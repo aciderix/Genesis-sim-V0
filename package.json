@@ -1,7 +1,7 @@
 {
-  "name": "react-example",
+  "name": "genesis-simulator",
   "private": true,
-  "version": "0.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -12,7 +12,10 @@
     "cli": "tsx src/cli/index.ts",
     "cli:run": "tsx src/cli/index.ts run",
     "cli:bench": "tsx src/cli/index.ts benchmark",
-    "cli:help": "tsx src/cli/index.ts help"
+    "cli:help": "tsx src/cli/index.ts help",
+    "tauri:dev": "npx @tauri-apps/cli dev",
+    "tauri:build": "npx @tauri-apps/cli build",
+    "tauri:init": "npx @tauri-apps/cli init"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
