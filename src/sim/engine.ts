@@ -7,6 +7,12 @@ export const PHEROMONE_CELL_SIZE = 10;
 
 function sigmoid(x: number) { return 1 / (1 + Math.exp(-x)); }
 
+// [OPT-2] Numeric bond key — no string allocation, fast Set<number> lookups
+// Safe for IDs up to ~1M (lo * 1_000_000 + hi stays under Number.MAX_SAFE_INTEGER)
+function bkey(a: number, b: number): number {
+  return a < b ? a * 1000000 + b : b * 1000000 + a;
+}
+
 export class Engine {
   state: SimState;
   config: SimConfig;
@@ -19,6 +25,17 @@ export class Engine {
   private gridRows: number;
   private grid: Particle[][];
   private nutrientGrid: { x: number; y: number; amount: number; isCorpse?: boolean }[][];
+
+  // ═══ OPTIMIZATION: Reusable data structures ═══
+  // [OPT-2] O(1) bond existence check — numeric keys for zero-alloc lookups
+  private bondSet: Set<number> = new Set();
+  // [OPT-3] Pre-allocated neural network buffers — avoids ~30K array allocs/tick at 10K particles
+  private _nnInputs: number[] = new Array(9);
+  private _nnHidden: number[] = new Array(6);
+  private _nnOutputs: number[] = new Array(9);
+  // [OPT-5] Reusable Map/Set — avoids GC pressure from creating new ones each tick
+  private _particleMap: Map<number, Particle> = new Map();
+  private _activeSpecies: Set<number> = new Set();
 
   constructor(config: SimConfig) {
     this.config = config;
@@ -280,7 +297,7 @@ export class Engine {
     this.state.time += dt;
     
     // Seasons
-    const yearLength = 120; // 120 seconds per year
+    const yearLength = 120;
     const yearPhase = (this.state.time % yearLength) / yearLength;
     if (yearPhase < 0.25) this.state.season = 'Spring';
     else if (yearPhase < 0.5) this.state.season = 'Summer';
@@ -304,7 +321,53 @@ export class Engine {
 
     if (Math.random() < this.config.nutrientSpawnRate * dt * seasonTemp) this.spawnNutrient();
 
-    // Viruses
+    // ═══════════════════════════════════════════════════════════════
+    // [OPT] BUILD SPATIAL GRIDS EARLY — before virus processing
+    // This lets viruses use the grid for O(k) collision instead of O(N)
+    // ═══════════════════════════════════════════════════════════════
+    const gridSize = 50;
+    const cols = this.gridCols;
+    const rows = this.gridRows;
+    
+    // Perf: clear pre-allocated grids instead of creating new ones (avoids GC pressure)
+    for (let i = 0; i < this.grid.length; i++) {
+      this.grid[i].length = 0;
+      this.nutrientGrid[i].length = 0;
+    }
+    const grid = this.grid;
+    const nutrientGrid = this.nutrientGrid;
+
+    // [OPT-5] Reuse particleMap — clear + refill instead of new Map()
+    this._particleMap.clear();
+    const particleMap = this._particleMap;
+
+    for (let i = 0; i < this.state.particles.length; i++) {
+      const p = this.state.particles[i];
+      if (p.dead) continue;
+      particleMap.set(p.id, p);
+      const gx = Math.max(0, Math.min(cols - 1, Math.floor(p.x / gridSize)));
+      const gy = Math.max(0, Math.min(rows - 1, Math.floor(p.y / gridSize)));
+      grid[gy * cols + gx].push(p);
+    }
+    
+    for (let i = 0; i < this.state.nutrients.length; i++) {
+      const n = this.state.nutrients[i];
+      if (n.amount <= 0) continue;
+      const gx = Math.max(0, Math.min(cols - 1, Math.floor(n.x / gridSize)));
+      const gy = Math.max(0, Math.min(rows - 1, Math.floor(n.y / gridSize)));
+      nutrientGrid[gy * cols + gx].push(n);
+    }
+
+    // [OPT-2] Rebuild bondSet once per tick for O(1) existence checks
+    this.bondSet.clear();
+    for (let i = 0; i < this.state.bonds.length; i++) {
+      const b = this.state.bonds[i];
+      this.bondSet.add(bkey(b.p1, b.p2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // VIRUSES — [OPT-1] Grid-based collision instead of O(V×N)
+    // ═══════════════════════════════════════════════════════════════
     if (Math.random() < 0.5 * dt) {
       this.state.viruses.push({
         x: Math.random() * this.config.width, y: Math.random() * this.config.height,
@@ -327,18 +390,33 @@ export class Engine {
         continue;
       }
       
+      // [OPT-1] Only check particles in nearby grid cells — O(k) instead of O(N)
       let hit = false;
-      for (const p of this.state.particles) {
-        if (!p.dead && (p.x - v.x)**2 + (p.y - v.y)**2 < (p.radius + v.radius)**2) {
-          p.genome = this.mutateGenome(p.genome); // Virus mutates genome
-          p.genome = this.mutateGenome(p.genome); // Double mutation for impact
-          p.energy -= 20; // Sickness
-          hit = true; break;
+      const vgx = Math.max(0, Math.min(cols - 1, Math.floor(v.x / gridSize)));
+      const vgy = Math.max(0, Math.min(rows - 1, Math.floor(v.y / gridSize)));
+      outerVirus:
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const nx = vgx + dx; const ny = vgy + dy;
+          if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) {
+            const cell = grid[ny * cols + nx];
+            for (let j = 0; j < cell.length; j++) {
+              const p = cell[j];
+              if (!p.dead && (p.x - v.x)**2 + (p.y - v.y)**2 < (p.radius + v.radius)**2) {
+                p.genome = this.mutateGenome(p.genome);
+                p.genome = this.mutateGenome(p.genome);
+                p.energy -= 20;
+                hit = true;
+                break outerVirus;
+              }
+            }
+          }
         }
       }
       if (hit) this.state.viruses.splice(i, 1);
     }
 
+    // Novelty search (unchanged)
     if (Math.random() < 0.05 && this.state.particles.length > 0) {
       const avgEnergy = this.state.particles.reduce((a,b)=>a+b.energy,0)/this.state.particles.length;
       const avgComp = this.state.particles.reduce((a,b)=>a+b.complexity,0)/this.state.particles.length;
@@ -355,36 +433,11 @@ export class Engine {
       }
     }
 
-    const gridSize = 50;
-    const cols = this.gridCols;
-    const rows = this.gridRows;
-    
-    // Perf: clear pre-allocated grids instead of creating new ones (avoids GC pressure)
-    for (let i = 0; i < this.grid.length; i++) {
-      this.grid[i].length = 0;
-      this.nutrientGrid[i].length = 0;
-    }
-    const grid = this.grid;
-    const nutrientGrid = this.nutrientGrid;
-    const particleMap = new Map<number, Particle>();
-
-    for (let i = 0; i < this.state.particles.length; i++) {
-      const p = this.state.particles[i];
-      if (p.dead) continue;
-      particleMap.set(p.id, p);
-      const gx = Math.max(0, Math.min(cols - 1, Math.floor(p.x / gridSize)));
-      const gy = Math.max(0, Math.min(rows - 1, Math.floor(p.y / gridSize)));
-      grid[gy * cols + gx].push(p);
-    }
-    
-    for (let i = 0; i < this.state.nutrients.length; i++) {
-      const n = this.state.nutrients[i];
-      if (n.amount <= 0) continue;
-      const gx = Math.max(0, Math.min(cols - 1, Math.floor(n.x / gridSize)));
-      const gy = Math.max(0, Math.min(rows - 1, Math.floor(n.y / gridSize)));
-      nutrientGrid[gy * cols + gx].push(n);
-    }
-
+    // ═══════════════════════════════════════════════════════════════
+    // PARTICLE UPDATE LOOP
+    // [OPT-3] Pre-allocated NN arrays — no new Array() per particle
+    // [OPT-2] bondSet.has() for O(1) bond existence check
+    // ═══════════════════════════════════════════════════════════════
     for (let i = 0; i < this.state.particles.length; i++) {
       const p = this.state.particles[i];
       if (p.dead) continue;
@@ -423,9 +476,9 @@ export class Engine {
       const gx = Math.max(0, Math.min(cols - 1, Math.floor(p.x / gridSize)));
       const gy = Math.max(0, Math.min(rows - 1, Math.floor(p.y / gridSize)));
       
-      for (let dx = -2; dx <= 2; dx++) {
-        for (let dy = -2; dy <= 2; dy++) {
-          const nx = gx + dx; const ny = gy + dy;
+      for (let ddx = -2; ddx <= 2; ddx++) {
+        for (let ddy = -2; ddy <= 2; ddy++) {
+          const nx = gx + ddx; const ny = gy + ddy;
           if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) {
             const idx = ny * cols + nx;
             
@@ -485,21 +538,29 @@ export class Engine {
       }
 
       if (p.genome.brain) {
-        const inputs = [
-          1.0, p.energy / 100, Math.min(p.age / 1000, 1.0),
-          fCount > 0 ? 1 : 0, mCount > 0 ? 1 : 0, dCount > 0 ? 1 : 0,
-          this.getPheromoneAt(p.x, p.y) / 100, p.mem, soundLevel
-        ];
+        // [OPT-3] Use pre-allocated arrays instead of new Array() each iteration
+        const inputs = this._nnInputs;
+        inputs[0] = 1.0;
+        inputs[1] = p.energy / 100;
+        inputs[2] = Math.min(p.age / 1000, 1.0);
+        inputs[3] = fCount > 0 ? 1 : 0;
+        inputs[4] = mCount > 0 ? 1 : 0;
+        inputs[5] = dCount > 0 ? 1 : 0;
+        inputs[6] = this.getPheromoneAt(p.x, p.y) / 100;
+        inputs[7] = p.mem;
+        inputs[8] = soundLevel;
 
-        const hidden = new Array(6).fill(0);
+        const hidden = this._nnHidden;
         for(let j=0; j<6; j++) {
+          hidden[j] = 0;
           for(let k=0; k<9; k++) hidden[j] += inputs[k] * p.genome.brain.wIH[k][j];
           hidden[j] = Math.tanh(hidden[j]);
         }
         
         const outCount = p.genome.brain.wHO[0].length;
-        const outputs = new Array(outCount).fill(0);
+        const outputs = this._nnOutputs;
         for(let j=0; j<outCount; j++) {
+          outputs[j] = 0;
           for(let k=0; k<6; k++) outputs[j] += hidden[k] * p.genome.brain.wHO[k][j];
         }
 
@@ -514,7 +575,7 @@ export class Engine {
         if (sigmoid(outputs[2]) > 0.5 && closestNutrient) {
           if (closestNutrientDist < (p.radius + 5)**2) {
             const consume = Math.min(closestNutrient.amount, 20 * dt);
-            closestNutrient.amount -= consume; p.energy += consume * 3; // Increased energy gain from 2 to 3
+            closestNutrient.amount -= consume; p.energy += consume * 3;
           }
         }
         if (sigmoid(outputs[3]) > 0.5 && p.energy > 80) {
@@ -536,19 +597,14 @@ export class Engine {
         }
         p.mem = sigmoid(outputs[7]);
         
-        // Bond (Output 8)
+        // Bond (Output 8) — [OPT-2] O(1) existence check via bondSet
         if (outCount > 8 && sigmoid(outputs[8]) > 0.5 && closestOther) {
           if (closestOtherDist < (p.radius + closestOther.radius + 10)**2 && closestOther.organismId !== p.organismId) {
-            let exists = false;
-            for(let j=0; j<this.state.bonds.length; j++) {
-              const b = this.state.bonds[j];
-              if ((b.p1 === p.id && b.p2 === closestOther.id) || (b.p2 === p.id && b.p1 === closestOther.id)) {
-                exists = true; break;
-              }
-            }
-            if (!exists) {
+            const key = bkey(p.id, closestOther.id);
+            if (!this.bondSet.has(key)) {
               this.state.bonds.push({ p1: p.id, p2: closestOther.id, optimalDistance: p.radius + closestOther.radius + 2, strength: 0.1 });
-              p.energy -= 5; // Bonding cost reduced from 50 to 5
+              this.bondSet.add(key); // Keep set in sync for this tick
+              p.energy -= 5;
             }
           }
         }
@@ -588,18 +644,24 @@ export class Engine {
     // Filter out consumed nutrients and decay corpses
     for (const n of this.state.nutrients) {
       if (n.isCorpse) {
-        n.amount -= dt * 2; // Corpses decay
-        this.addPheromoneAt(n.x, n.y, -10 * dt); // Emit bad smell
-        if (n.amount < 20) n.isCorpse = false; // Turns into normal food
+        n.amount -= dt * 2;
+        this.addPheromoneAt(n.x, n.y, -10 * dt);
+        if (n.amount < 20) n.isCorpse = false;
       }
     }
     this.state.nutrients = this.state.nutrients.filter(n => n.amount > 0);
 
-    for (let i = this.state.bonds.length - 1; i >= 0; i--) {
+    // ═══════════════════════════════════════════════════════════════
+    // BOND SPRINGS — [OPT-4] Compaction instead of splice
+    // Array compaction is O(B) total vs O(B²) worst-case with splice
+    // Note: force is applied BEFORE the break check, same as original
+    // ═══════════════════════════════════════════════════════════════
+    let bondWriteIdx = 0;
+    for (let i = 0; i < this.state.bonds.length; i++) {
       const b = this.state.bonds[i];
       const p1 = particleMap.get(b.p1);
       const p2 = particleMap.get(b.p2);
-      if (!p1 || !p2 || p1.dead || p2.dead) { this.state.bonds.splice(i, 1); continue; }
+      if (!p1 || !p2 || p1.dead || p2.dead) continue; // removed — skip write
 
       const dx = p2.x - p1.x; const dy = p2.y - p1.y;
       const distSq = dx * dx + dy * dy;
@@ -609,18 +671,28 @@ export class Engine {
         const nx = dx / dist; const ny = dy / dist;
         p1.vx += nx * force * dt * 50; p1.vy += ny * force * dt * 50;
         p2.vx -= nx * force * dt * 50; p2.vy -= ny * force * dt * 50;
-        if (dist > b.optimalDistance * 3) { this.state.bonds.splice(i, 1); continue; }
+        // Bond breaks if too stretched — force was still applied (same as original)
+        if (dist > b.optimalDistance * 3) continue; // removed — skip write
         for (let c = 0; c < NUM_CHEMICALS; c++) {
           const diff = p2.chem[c] - p1.chem[c];
           const transfer = diff * 0.1 * dt;
           p1.chem[c] += transfer; p2.chem[c] -= transfer;
         }
       }
+      // Keep this bond
+      this.state.bonds[bondWriteIdx++] = b;
     }
+    this.state.bonds.length = bondWriteIdx; // Truncate removed bonds in-place
 
-    const activeSpecies = new Set(this.state.particles.map(p => p.speciesId));
+    // ═══════════════════════════════════════════════════════════════
+    // SPECIES TRACKING — [OPT-5] Reuse Set instead of creating new one
+    // ═══════════════════════════════════════════════════════════════
+    this._activeSpecies.clear();
+    for (let i = 0; i < this.state.particles.length; i++) {
+      this._activeSpecies.add(this.state.particles[i].speciesId);
+    }
     for (const s of this.state.speciesHistory) {
-      if (!s.extinct && !activeSpecies.has(s.id)) s.extinct = true;
+      if (!s.extinct && !this._activeSpecies.has(s.id)) s.extinct = true;
     }
     this.state.particles = this.state.particles.filter(p => !p.dead);
 
