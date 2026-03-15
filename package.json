@@ -12,7 +12,14 @@
     "cli": "tsx src/cli/index.ts",
     "cli:run": "tsx src/cli/index.ts run",
     "cli:bench": "tsx src/cli/index.ts benchmark",
-    "cli:help": "tsx src/cli/index.ts help"
+    "cli:help": "tsx src/cli/index.ts help",
+    "asbuild:debug": "asc assembly/index.ts --target debug",
+    "asbuild:release": "asc assembly/index.ts --target release",
+    "asbuild": "npm run asbuild:debug && npm run asbuild:release",
+    "test": "node --test",
+    "start": "npx serve .",
+    "build:wasm": "asc assembly/index.ts --outFile build/release.wasm --bindings esm --optimizeLevel 3 --shrinkLevel 0 && cp build/release.wasm public/genesis-engine.wasm && cp build/release.js src/sim/wasm-bindings.js",
+    "build:all": "npm run build:wasm && npm run build"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
@@ -32,12 +39,20 @@
     "vite": "^6.2.0"
   },
   "devDependencies": {
+    "@assemblyscript/loader": "^0.28.10",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
+    "assemblyscript": "^0.28.10",
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "exports": {
+    ".": {
+      "import": "./build/release.js",
+      "types": "./build/release.d.ts"
+    }
   }
 }
