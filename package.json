@@ -8,7 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "cli": "tsx src/cli/index.ts",
+    "cli:run": "tsx src/cli/index.ts run",
+    "cli:bench": "tsx src/cli/index.ts benchmark",
+    "cli:help": "tsx src/cli/index.ts help"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

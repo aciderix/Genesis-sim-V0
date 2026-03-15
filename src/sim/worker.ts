@@ -5,6 +5,8 @@ let engine: Engine | null = null;
 let lastTime = performance.now();
 let isRunning = false;
 let speedMultiplier = 1;
+let tickCount = 0;
+let lastSpeciesHistoryLen = 0;
 
 const TARGET_FPS = 60;
 
@@ -83,6 +85,10 @@ function loop() {
     vData[i * 3 + 2] = viruses[i].radius;
   }
 
+  tickCount++;
+  // Perf: only send heavy data (speciesHistory, history) every ~15 ticks (~4 FPS)
+  const sendHeavyData = tickCount % 15 === 0;
+
   const ctx: Worker = self as any;
   ctx.postMessage({
     type: 'TICK',
@@ -95,8 +101,6 @@ function loop() {
       viruses: vData.buffer,
       obstacles: engine.state.obstacles,
       zones: engine.state.zones,
-      speciesHistory: engine.state.speciesHistory,
-      history: engine.state.history,
       season: engine.state.season,
       stats: {
         population: particles.length,
@@ -107,7 +111,12 @@ function loop() {
         dayLight: engine.state.dayLight,
         noveltyCount: engine.state.noveltyArchive.length,
         speciesCount: speciesSet.size,
-      }
+      },
+      // Heavy data sent periodically to reduce serialization cost
+      ...(sendHeavyData ? {
+        speciesHistory: engine.state.speciesHistory,
+        history: engine.state.history,
+      } : {}),
     }
   }, [pData.buffer, nData.buffer, bData.buffer, sData.buffer, vData.buffer]);
 
@@ -131,11 +140,21 @@ self.onmessage = (e) => {
     case 'RESET':
       if (engine) {
         engine = new Engine(engine.config);
+        tickCount = 0; lastSpeciesHistoryLen = 0;
         if (!isRunning) { lastTime = performance.now(); engine.update(0); loop(); }
       }
       break;
     case 'SET_SPEED':
       speedMultiplier = payload;
+      break;
+    case 'SET_CONFIG':
+      if (engine && payload) {
+        for (const key of Object.keys(payload)) {
+          if (key in engine.config) {
+            (engine.config as any)[key] = payload[key];
+          }
+        }
+      }
       break;
     case 'GET_PARTICLE':
       if (engine) {
@@ -171,6 +190,7 @@ self.onmessage = (e) => {
           let maxId = 0;
           for(const p of state.particles) if(p.id > maxId) maxId = p.id;
           engine.nextId = maxId + 1;
+          tickCount = 0; lastSpeciesHistoryLen = 0;
         } catch(err) { console.error("Failed to load state", err); }
       }
       break;

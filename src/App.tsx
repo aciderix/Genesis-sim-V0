@@ -27,17 +27,24 @@ export default function App() {
   const [activeTool, setActiveTool] = useState<ToolType>('inspect');
   const pheromoneCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const spriteCache = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const [maxParticles, setMaxParticles] = useState(2000);
   const [showTree, setShowTree] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [speciesHistory, setSpeciesHistory] = useState<SpeciesRecord[]>([]);
 
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  // Perf: transform as ref avoids stale closures in worker callback + unnecessary re-renders
+  const transformRef = useRef({ x: 0, y: 0, scale: 1 });
+  const selectedParticleIdRef = useRef<number | null>(null);
+  const lastReactUpdateRef = useRef(0);
   const isDragging = useRef(false);
   const isToolActive = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
 
   const width = 1200;
   const height = 800;
+
+  // Keep ref in sync with state for worker callback
+  useEffect(() => { selectedParticleIdRef.current = selectedParticleId; }, [selectedParticleId]);
 
   useEffect(() => {
     const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
@@ -52,17 +59,27 @@ export default function App() {
       const { type, payload } = e.data;
       if (type === 'TICK') {
         render(payload);
-        setStats(payload.stats);
-        setSpeciesHistory(payload.speciesHistory);
-        setSeason(payload.season);
-        setHistory(prev => {
-          if (prev.length === 0 || payload.stats.time - prev[prev.length - 1].time >= 1) {
-            const newHistory = [...prev, payload.stats];
-            if (newHistory.length > 50) newHistory.shift();
-            return newHistory;
-          }
-          return prev;
-        });
+
+        // Perf: throttle React state updates to ~4 FPS (canvas stays at full FPS)
+        const now = performance.now();
+        if (now - lastReactUpdateRef.current > 250) {
+          lastReactUpdateRef.current = now;
+          setStats(payload.stats);
+          setSeason(payload.season);
+          setHistory(prev => {
+            if (prev.length === 0 || payload.stats.time - prev[prev.length - 1].time >= 1) {
+              const newHistory = [...prev, payload.stats];
+              if (newHistory.length > 50) newHistory.shift();
+              return newHistory;
+            }
+            return prev;
+          });
+        }
+
+        // Species history only arrives periodically from worker
+        if (payload.speciesHistory) {
+          setSpeciesHistory(payload.speciesHistory);
+        }
       } else if (type === 'PARTICLE_DATA') {
         setSelectedParticleData(payload);
         setSelectedParticleId(payload ? payload.id : null);
@@ -83,6 +100,10 @@ export default function App() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Use refs for latest values (avoids stale closure from useEffect)
+    const transform = transformRef.current;
+    const selectedParticleId = selectedParticleIdRef.current;
 
     const bgLight = Math.floor(payload.stats.dayLight * 30);
     ctx.fillStyle = `rgb(${bgLight}, ${bgLight}, ${bgLight})`;
@@ -266,9 +287,10 @@ export default function App() {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
+    const t = transformRef.current;
     return {
-      x: ((e.clientX - rect.left) * scaleX - transform.x) / transform.scale,
-      y: ((e.clientY - rect.top) * scaleY - transform.y) / transform.scale
+      x: ((e.clientX - rect.left) * scaleX - t.x) / t.scale,
+      y: ((e.clientY - rect.top) * scaleY - t.y) / t.scale
     };
   };
 
@@ -284,15 +306,14 @@ export default function App() {
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const scaleAdjust = e.deltaY > 0 ? 0.9 : 1.1;
-    setTransform(prev => {
-      const canvas = canvasRef.current;
-      if (!canvas) return prev;
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
-      const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
-      const newScale = Math.max(0.1, Math.min(prev.scale * scaleAdjust, 10));
-      return { x: prev.x + (mouseX - prev.x) * (1 - scaleAdjust), y: prev.y + (mouseY - prev.y) * (1 - scaleAdjust), scale: newScale };
-    });
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const prev = transformRef.current;
+    const newScale = Math.max(0.1, Math.min(prev.scale * scaleAdjust, 10));
+    transformRef.current = { x: prev.x + (mouseX - prev.x) * (1 - scaleAdjust), y: prev.y + (mouseY - prev.y) * (1 - scaleAdjust), scale: newScale };
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -323,7 +344,8 @@ export default function App() {
         lastPos.current = { x: e.clientX, y: e.clientY };
         const canvas = canvasRef.current;
         if (!canvas) return;
-        setTransform(prev => ({ ...prev, x: prev.x + dx * (canvas.width / canvas.getBoundingClientRect().width), y: prev.y + dy * (canvas.height / canvas.getBoundingClientRect().height) }));
+        const prev = transformRef.current;
+        transformRef.current = { ...prev, x: prev.x + dx * (canvas.width / canvas.getBoundingClientRect().width), y: prev.y + dy * (canvas.height / canvas.getBoundingClientRect().height) };
       } else if (isToolActive.current) {
         const simPos = getSimCoords(e);
         if (activeTool === 'food') workerRef.current?.postMessage({ type: 'ADD_FOOD', payload: simPos });
@@ -341,7 +363,7 @@ export default function App() {
     setSimSpeed(nextSpeed);
     workerRef.current?.postMessage({ type: 'SET_SPEED', payload: nextSpeed });
   };
-  const resetSim = () => { workerRef.current?.postMessage({ type: 'RESET' }); if (isPlaying) workerRef.current?.postMessage({ type: 'START' }); setSelectedParticleId(null); setSelectedParticleData(null); setTransform({ x: 0, y: 0, scale: 1 }); };
+  const resetSim = () => { workerRef.current?.postMessage({ type: 'RESET' }); if (isPlaying) workerRef.current?.postMessage({ type: 'START' }); setSelectedParticleId(null); setSelectedParticleData(null); transformRef.current = { x: 0, y: 0, scale: 1 }; };
   const handleSave = () => workerRef.current?.postMessage({ type: 'SAVE' });
   const handleLoad = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -400,7 +422,20 @@ export default function App() {
               {season === 'Winter' && <Snowflake size={14} className="text-blue-200" />}
               <span className="hidden sm:inline">{season}</span>
             </div>
-            <div>POP: <span className="text-white">{stats.population}</span></div>
+            <div className="flex items-center gap-1">
+              POP: <span className="text-white">{stats.population}</span>
+              <span className="text-white/30">/</span>
+              <span className={`text-white/80 cursor-pointer hover:text-white ${maxParticles === 0 ? 'text-yellow-400' : ''}`}
+                title="Click to change population cap"
+                onClick={() => {
+                  const presets = [500, 1000, 2000, 5000, 10000, 0];
+                  const currentIdx = presets.indexOf(maxParticles);
+                  const next = presets[(currentIdx + 1) % presets.length];
+                  setMaxParticles(next);
+                  workerRef.current?.postMessage({ type: 'SET_CONFIG', payload: { maxParticles: next } });
+                }}
+              >{maxParticles === 0 ? '∞' : maxParticles}</span>
+            </div>
             <div className="hidden sm:block">GEN: <span className="text-white">{stats.maxGeneration}</span></div>
             <div>TIME: <span className="text-white">{stats.time.toFixed(0)}s</span></div>
           </div>
