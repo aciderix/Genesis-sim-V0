@@ -1,0 +1,5 @@
+{
+  "name": "Genesis 2.0 Simulator",
+  "description": "An open-ended artificial life simulator featuring emergent chemistry, physics, genetics, and behavior.",
+  "requestFramePermissions": []
+}
