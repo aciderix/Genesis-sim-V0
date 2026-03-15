@@ -378,7 +378,7 @@ ${c.bold}Commands:${c.reset}
     --ticks <n>        Number of ticks (default: 1000)
     --dt <n>           Delta time per tick (default: 0.016)
     --population <n>   Initial population (default: 300)
-    --max-particles <n> Max particles (default: 2000)
+    --max-particles <n> Max particles (default: 2000, 0 = unlimited)
     --width <n>        World width (default: 1200)
     --height <n>       World height (default: 800)
     --mutation-rate <n> Mutation rate (default: 0.1)

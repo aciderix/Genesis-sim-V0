@@ -206,7 +206,7 @@ export class Engine {
   }
 
   reproduce(p: Particle, mate: Particle | null) {
-    if (this.state.particles.length >= this.config.maxParticles) return;
+    if (this.config.maxParticles > 0 && this.state.particles.length >= this.config.maxParticles) return;
     p.energy -= 40;
     if (mate) mate.energy -= 40;
     

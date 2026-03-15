@@ -147,6 +147,15 @@ self.onmessage = (e) => {
     case 'SET_SPEED':
       speedMultiplier = payload;
       break;
+    case 'SET_CONFIG':
+      if (engine && payload) {
+        for (const key of Object.keys(payload)) {
+          if (key in engine.config) {
+            (engine.config as any)[key] = payload[key];
+          }
+        }
+      }
+      break;
     case 'GET_PARTICLE':
       if (engine) {
         const { x, y } = payload;

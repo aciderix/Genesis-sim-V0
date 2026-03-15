@@ -27,6 +27,7 @@ export default function App() {
   const [activeTool, setActiveTool] = useState<ToolType>('inspect');
   const pheromoneCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const spriteCache = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const [maxParticles, setMaxParticles] = useState(2000);
   const [showTree, setShowTree] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [speciesHistory, setSpeciesHistory] = useState<SpeciesRecord[]>([]);
@@ -421,7 +422,20 @@ export default function App() {
               {season === 'Winter' && <Snowflake size={14} className="text-blue-200" />}
               <span className="hidden sm:inline">{season}</span>
             </div>
-            <div>POP: <span className="text-white">{stats.population}</span></div>
+            <div className="flex items-center gap-1">
+              POP: <span className="text-white">{stats.population}</span>
+              <span className="text-white/30">/</span>
+              <span className={`text-white/80 cursor-pointer hover:text-white ${maxParticles === 0 ? 'text-yellow-400' : ''}`}
+                title="Click to change population cap"
+                onClick={() => {
+                  const presets = [500, 1000, 2000, 5000, 10000, 0];
+                  const currentIdx = presets.indexOf(maxParticles);
+                  const next = presets[(currentIdx + 1) % presets.length];
+                  setMaxParticles(next);
+                  workerRef.current?.postMessage({ type: 'SET_CONFIG', payload: { maxParticles: next } });
+                }}
+              >{maxParticles === 0 ? '∞' : maxParticles}</span>
+            </div>
             <div className="hidden sm:block">GEN: <span className="text-white">{stats.maxGeneration}</span></div>
             <div>TIME: <span className="text-white">{stats.time.toFixed(0)}s</span></div>
           </div>
