@@ -15,12 +15,21 @@ export class Engine {
   pheromoneCols: number;
   pheromoneRows: number;
   pheromonesBuffer2: Float32Array;
+  private gridCols: number;
+  private gridRows: number;
+  private grid: Particle[][];
+  private nutrientGrid: { x: number; y: number; amount: number; isCorpse?: boolean }[][];
 
   constructor(config: SimConfig) {
     this.config = config;
     this.pheromoneCols = Math.ceil(config.width / PHEROMONE_CELL_SIZE);
     this.pheromoneRows = Math.ceil(config.height / PHEROMONE_CELL_SIZE);
     this.pheromonesBuffer2 = new Float32Array(this.pheromoneCols * this.pheromoneRows);
+    this.gridCols = Math.ceil(config.width / 50);
+    this.gridRows = Math.ceil(config.height / 50);
+    const totalCells = this.gridCols * this.gridRows;
+    this.grid = Array.from({ length: totalCells }, () => []);
+    this.nutrientGrid = Array.from({ length: totalCells }, () => []);
     
     this.state = {
       particles: [], bonds: [], time: 0, width: config.width, height: config.height,
@@ -96,6 +105,24 @@ export class Engine {
     return { traitX: tx, traitY: ty };
   }
 
+  // Perf: manual deep clone — much faster than JSON roundtrip
+  cloneGenome(g: Genome): Genome {
+    const reactions = g.reactions.map(r => {
+      const c: Reaction = { sub: r.sub, prod: r.prod, rate: r.rate, energyDelta: r.energyDelta };
+      if (r.inhibitor !== undefined) c.inhibitor = r.inhibitor;
+      return c;
+    });
+    return {
+      reactions,
+      rules: [],
+      brain: g.brain ? {
+        wIH: g.brain.wIH.map(row => row.slice()),
+        wHO: g.brain.wHO.map(row => row.slice()),
+      } : undefined,
+      color: [g.color[0], g.color[1], g.color[2]],
+    };
+  }
+
   spawnRandomParticle() {
     const genome = this.randomGenome();
     const speciesId = this.nextSpeciesId++;
@@ -125,7 +152,11 @@ export class Engine {
       return Math.random() > 0.5 ? w : w2;
     }));
     return {
-      reactions: JSON.parse(JSON.stringify(g1.reactions)),
+      reactions: g1.reactions.map(r => {
+        const c: Reaction = { sub: r.sub, prod: r.prod, rate: r.rate, energyDelta: r.energyDelta };
+        if (r.inhibitor !== undefined) c.inhibitor = r.inhibitor;
+        return c;
+      }),
       rules: [],
       brain: { wIH, wHO },
       color: [
@@ -137,7 +168,7 @@ export class Engine {
   }
 
   mutateGenome(genome: Genome): Genome {
-    const newGenome: Genome = JSON.parse(JSON.stringify(genome));
+    const newGenome: Genome = this.cloneGenome(genome);
     newGenome.color[0] = Math.max(0, Math.min(255, newGenome.color[0] + (Math.random() - 0.5) * 50));
     newGenome.color[1] = Math.max(0, Math.min(255, newGenome.color[1] + (Math.random() - 0.5) * 50));
     newGenome.color[2] = Math.max(0, Math.min(255, newGenome.color[2] + (Math.random() - 0.5) * 50));
@@ -325,11 +356,16 @@ export class Engine {
     }
 
     const gridSize = 50;
-    const cols = Math.ceil(this.config.width / gridSize);
-    const rows = Math.ceil(this.config.height / gridSize);
+    const cols = this.gridCols;
+    const rows = this.gridRows;
     
-    const grid: Particle[][] = Array.from({ length: cols * rows }, () => []);
-    const nutrientGrid: typeof this.state.nutrients[] = Array.from({ length: cols * rows }, () => []);
+    // Perf: clear pre-allocated grids instead of creating new ones (avoids GC pressure)
+    for (let i = 0; i < this.grid.length; i++) {
+      this.grid[i].length = 0;
+      this.nutrientGrid[i].length = 0;
+    }
+    const grid = this.grid;
+    const nutrientGrid = this.nutrientGrid;
     const particleMap = new Map<number, Particle>();
 
     for (let i = 0; i < this.state.particles.length; i++) {
