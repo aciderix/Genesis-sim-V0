@@ -675,11 +675,14 @@ void Engine::update(float dt) {
     if (frameCount % 3 == 0) updateMorphogens(dt * 3);
     if (frameCount % 3 == 0) updateTemperature(dt * 3);
 
-    // Sounds
+    // Sounds – swap-and-pop removal (O(1) per remove instead of O(n))
     for (int i = (int)state.sounds.size() - 1; i >= 0; i--) {
         state.sounds[i].radius += dt * 200;
         state.sounds[i].volume -= dt * 2;
-        if (state.sounds[i].volume <= 0) state.sounds.erase(state.sounds.begin() + i);
+        if (state.sounds[i].volume <= 0) {
+            state.sounds[i] = state.sounds.back();
+            state.sounds.pop_back();
+        }
     }
 
     // Nutrient spawning
@@ -1045,8 +1048,8 @@ void Engine::update(float dt) {
             p.energy -= dt * 0.5f;
         }
 
-        // Vocalize
-        if (sigmoid(nnOutputs[6]) > 0.5f && p.energy > 10) {
+        // Vocalize (capped at 200 sounds to prevent freeze)
+        if (sigmoid(nnOutputs[6]) > 0.5f && p.energy > 10 && (int)state.sounds.size() < 200) {
             Sound s;
             s.x = p.x; s.y = p.y; s.z = p.z;
             s.volume = 1.0f; s.radius = 0; s.frequency = nnOutputs[6] * 1000;

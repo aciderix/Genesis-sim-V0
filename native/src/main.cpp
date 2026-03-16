@@ -30,30 +30,16 @@ int main(int argc, char* argv[]) {
 
     // ─── Init Log File ───────────────────────────────────────────
 #ifdef GENESIS_ANDROID
-    // Try Downloads, fallback to app internal storage
-    const char* downloadPaths[] = {
-        "/sdcard/Download",
-        "/storage/emulated/0/Download",
-        "/sdcard/Documents",
-        "/storage/emulated/0/Documents",
-        nullptr
-    };
-    const char* logDir = nullptr;
-    for (int i = 0; downloadPaths[i]; i++) {
-        FILE* test = fopen(downloadPaths[i], "r");
-        // Check dir exists by trying a temp file
-        char tmp[256];
-        snprintf(tmp, sizeof(tmp), "%s/.genesis_test", downloadPaths[i]);
-        FILE* tf = fopen(tmp, "w");
-        if (tf) { fclose(tf); remove(tmp); logDir = downloadPaths[i]; break; }
-    }
-    if (!logDir) {
-        // Fallback to SDL pref path
+    // Use Android external files dir (accessible in file manager at
+    // Android/data/com.genesis.sim/files/ — no permission needed)
+    const char* extPath = SDL_AndroidGetExternalStoragePath();
+    if (extPath) {
+        ScreenLog::get().init(extPath);
+    } else {
+        // Fallback to SDL pref path (app-private)
         char* pref = SDL_GetPrefPath("Genesis", "Genesis3");
         if (pref) { ScreenLog::get().init(pref); SDL_free(pref); }
         else ScreenLog::get().init("/sdcard");
-    } else {
-        ScreenLog::get().init(logDir);
     }
 #else
     ScreenLog::get().init(".");
