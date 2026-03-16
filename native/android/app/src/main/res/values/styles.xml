@@ -2,6 +2,6 @@
 <resources>
     <style name="Theme.Genesis" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowFullscreen">true</item>
-        <item name="android:windowKeepScreenOn">true</item>
+        <item name="android:keepScreenOn">true</item>
     </style>
 </resources>

@@ -23,6 +23,15 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            storeFile file('../genesis-release.keystore')
+            storePassword 'genesis123'
+            keyAlias 'genesis'
+            keyPassword 'genesis123'
+        }
+    }
+
     externalNativeBuild {
         cmake {
             path '../../CMakeLists.txt'
@@ -32,7 +41,11 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+        }
+        debug {
+            signingConfig signingConfigs.release
         }
     }
 }

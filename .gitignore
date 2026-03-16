@@ -14,3 +14,15 @@ src-tauri/gen/schemas/
 # Android build artifacts
 android/app/build/
 android/.gradle/
+
+# Native Android build artifacts
+native/android/.gradle/
+native/android/app/.cxx/
+native/android/app/build/
+native/android/build/
+native/android/genesis-release.keystore
+native/SDL2-2.30.9/
+native/build/
+
+# APK outputs
+*.apk
