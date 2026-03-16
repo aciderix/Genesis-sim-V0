@@ -4,6 +4,23 @@
 #include <vector>
 #include <cstring>
 
+#ifdef GENESIS_ANDROID
+#include <android/log.h>
+#define LOG_TAG "GenesisGL"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGI(...) printf(__VA_ARGS__); printf("\n")
+#define LOGE(...) fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n")
+#endif
+
+static void checkGLError(const char* label) {
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        LOGE("GL error at %s: 0x%04x", label, err);
+    }
+}
+
 // ═══ Shader sources (OpenGL ES 2.0 / GL 2.1 compatible) ══════════════════
 
 #ifdef GENESIS_ANDROID
@@ -91,10 +108,12 @@ Renderer::~Renderer() {
 }
 
 bool Renderer::init() {
+    LOGI("Renderer::init() - SDL_Init...");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) {
-        fprintf(stderr, "SDL init failed: %s\n", SDL_GetError());
+        LOGE("SDL init failed: %s", SDL_GetError());
         return false;
     }
+    LOGI("SDL_Init OK");
 
 #ifdef GENESIS_ANDROID
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -111,23 +130,27 @@ bool Renderer::init() {
 
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
+    LOGI("Creating window %dx%d flags=0x%x", winWidth, winHeight, flags);
     window = SDL_CreateWindow("Genesis 3.0 - Native",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         winWidth, winHeight, flags);
     if (!window) {
-        fprintf(stderr, "Window creation failed: %s\n", SDL_GetError());
+        LOGE("Window creation failed: %s", SDL_GetError());
         return false;
     }
 
 #ifdef GENESIS_ANDROID
     SDL_GetWindowSize(window, &winWidth, &winHeight);
+    LOGI("Android actual window size: %dx%d", winWidth, winHeight);
 #endif
 
+    LOGI("Creating GL context...");
     glContext = SDL_GL_CreateContext(window);
     if (!glContext) {
-        fprintf(stderr, "GL context creation failed: %s\n", SDL_GetError());
+        LOGE("GL context creation failed: %s", SDL_GetError());
         return false;
     }
+    LOGI("GL context created");
 
     SDL_GL_SetSwapInterval(1); // VSync
 
@@ -156,7 +179,13 @@ bool Renderer::init() {
     quadProgram = linkProgram(qvs, qfs);
     glDeleteShader(qvs); glDeleteShader(qfs);
 
-    if (!circleProgram || !lineProgram || !quadProgram) return false;
+    if (!circleProgram || !lineProgram || !quadProgram) {
+        LOGE("Shader program creation failed: circle=%u line=%u quad=%u",
+             circleProgram, lineProgram, quadProgram);
+        return false;
+    }
+    LOGI("All shaders compiled and linked OK");
+    checkGLError("after shaders");
 
     glGenBuffers(1, &circleVBO);
     glGenBuffers(1, &lineVBO);
@@ -164,6 +193,9 @@ bool Renderer::init() {
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    LOGI("Renderer::init() complete, VBOs: circle=%u line=%u quad=%u", circleVBO, lineVBO, quadVBO);
+    checkGLError("init end");
 
     return true;
 }
@@ -239,6 +271,13 @@ void Renderer::setProjection() {
 // ═══ Main Render ══════════════════════════════════════════════════════════
 
 void Renderer::render(const SimState& state, const SimConfig& config) {
+    static int renderFrame = 0;
+    renderFrame++;
+    if (renderFrame <= 5 || renderFrame % 60 == 0) {
+        LOGI("render() frame=%d particles=%d nutrients=%d bonds=%d viruses=%d sounds=%d",
+             renderFrame, (int)state.particles.size(), (int)state.nutrients.size(),
+             (int)state.bonds.size(), (int)state.viruses.size(), (int)state.sounds.size());
+    }
     // Viewport culling bounds
     float viewLeft = camX;
     float viewRight = camX + winWidth / camZoom;
@@ -503,5 +542,6 @@ void Renderer::render(const SimState& state, const SimConfig& config) {
         }
     }
 
+    checkGLError("end of render");
     SDL_GL_SwapWindow(window);
 }

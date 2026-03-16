@@ -2,12 +2,29 @@
 #include "renderer.h"
 #include <cstdio>
 #include <chrono>
+#include <csignal>
+#include <cstdlib>
 
 #ifdef GENESIS_ANDROID
 #include <SDL.h>
+#include <android/log.h>
+#define LOG_TAG "Genesis"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #else
 #include <SDL2/SDL.h>
+#define LOGI(...) printf(__VA_ARGS__); printf("\n")
+#define LOGW(...) printf("[WARN] "); printf(__VA_ARGS__); printf("\n")
+#define LOGE(...) fprintf(stderr, "[ERROR] "); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n")
 #endif
+
+// Signal handler for crash diagnostics
+static void signalHandler(int sig) {
+    LOGE("!!! SIGNAL %d received (SIGSEGV=%d, SIGABRT=%d, SIGFPE=%d) !!!", sig, SIGSEGV, SIGABRT, SIGFPE);
+    std::abort();
+}
+
 
 static void printStats(const SimState& state) {
     int autotrophs = 0, herbivores = 0, predators = 0, decomposers = 0;
@@ -33,58 +50,53 @@ static void printStats(const SimState& state) {
 int main(int argc, char* argv[]) {
     (void)argc; (void)argv;
 
+    signal(SIGSEGV, signalHandler);
+    signal(SIGABRT, signalHandler);
+    signal(SIGFPE, signalHandler);
+
+    LOGI("=== Genesis 3.0 Native starting ===");
+
     // ─── Simulation Config ────────────────────────────────────────
     SimConfig config;
-#ifdef GENESIS_ANDROID
-    // Reduced parameters for mobile performance
-    config.width = 800;
-    config.height = 600;
-    config.depth = 200;
-    config.initialParticles = 80;
-    config.maxParticles = 500;
-    config.nutrientSpawnRate = 5.0f;
-    config.virusSpawnRate = 0.2f;
-    config.enableMorphogens = false;      // Disable heavy field updates
-    config.enableTemperature = false;     // Disable heavy field updates
-#else
     config.width = 1200;
     config.height = 800;
     config.depth = 400;
     config.initialParticles = 300;
     config.maxParticles = 2000;
-    config.nutrientSpawnRate = 10.0f;
-    config.virusSpawnRate = 0.5f;
-    config.enableMorphogens = true;
-    config.enableTemperature = true;
-#endif
     config.friction = 0.92f;
     config.repulsion = 20.0f;
+    config.nutrientSpawnRate = 10.0f;
     config.mutationRate = 0.1f;
     config.enable3D = false;
     config.enableAbiogenesis = false;
     config.enableImmuneSystem = true;
     config.enableEpigenetics = true;
+    config.enableMorphogens = true;
+    config.enableTemperature = true;
     config.enableTrophicLevels = true;
     config.gravity = 0.5f;
     config.ambientTemperature = 25.0f;
+    config.virusSpawnRate = 0.5f;
     config.worldScale = 1.0f;
 
     // ─── Init Engine ──────────────────────────────────────────────
+    LOGI("Creating engine: %dx%d, %d particles, max=%d",
+         config.width, config.height, config.initialParticles, config.maxParticles);
     Engine engine(config);
-    printf("Genesis 3.0 Native — %d particles initialized\n", (int)engine.state.particles.size());
+    LOGI("Engine created: %d particles, %d nutrients",
+         (int)engine.state.particles.size(), (int)engine.state.nutrients.size());
 
     // ─── Init Renderer ────────────────────────────────────────────
-#ifdef GENESIS_ANDROID
-    Renderer renderer(0, 0); // Will get actual size from SDL window
-#else
+    LOGI("Creating renderer 1280x800");
     Renderer renderer(1280, 800);
-#endif
     if (!renderer.init()) {
-        fprintf(stderr, "Failed to init renderer\n");
+        LOGE("Failed to init renderer");
         return 1;
     }
+    LOGI("Renderer initialized: window=%dx%d", renderer.winWidth, renderer.winHeight);
 
     // ─── Main Loop ────────────────────────────────────────────────
+    LOGI("Entering main loop");
     bool running = true;
     bool paused = false;
     int speedMultiplier = 1;
@@ -93,6 +105,7 @@ int main(int argc, char* argv[]) {
     float fps = 0;
     bool dragging = false;
     int lastMouseX = 0, lastMouseY = 0;
+    int totalFrames = 0;
 
     auto lastTime = std::chrono::high_resolution_clock::now();
 
@@ -214,11 +227,19 @@ int main(int argc, char* argv[]) {
 
         // ─── FPS Counter ─────────────────────────────────────
         frameCount++;
+        totalFrames++;
         auto elapsed = std::chrono::duration<float>(now - lastFpsTime).count();
         if (elapsed >= 1.0f) {
             fps = frameCount / elapsed;
             frameCount = 0;
             lastFpsTime = now;
+            LOGI("Frame=%d FPS=%.0f Pop=%d Nutrients=%d Bonds=%d Viruses=%d dt=%.4f Season=%s",
+                 totalFrames, fps,
+                 (int)engine.state.particles.size(),
+                 (int)engine.state.nutrients.size(),
+                 (int)engine.state.bonds.size(),
+                 (int)engine.state.viruses.size(),
+                 dt, engine.state.season.c_str());
             printStats(engine.state);
             printf("FPS=%.0f", fps);
         }
