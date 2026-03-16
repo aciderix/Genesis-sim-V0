@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Genesis Simulator</string>
+    <string name="title_activity_main">Genesis Simulator</string>
+    <string name="package_name">com.genesis.simulator</string>
+    <string name="custom_url_scheme">com.genesis.simulator</string>
+</resources>
