@@ -73,15 +73,30 @@ jobs:
         working-directory: android
         run: chmod +x gradlew && ./gradlew assembleDebug
 
-      - name: Build APK (release unsigned)
+      - name: Build APK (release)
         working-directory: android
         run: ./gradlew assembleRelease
+
+      - name: Sign release APK with debug keystore
+        run: |
+          # Create a debug keystore for signing
+          keytool -genkey -v -keystore debug-release.keystore \
+            -alias genesis -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass genesis123 -keypass genesis123 \
+            -dname "CN=Genesis,OU=Dev,O=Genesis,L=Unknown,ST=Unknown,C=US"
+          # Sign the APK
+          apksigner sign --ks debug-release.keystore \
+            --ks-key-alias genesis \
+            --ks-pass pass:genesis123 \
+            --key-pass pass:genesis123 \
+            --out android/app/build/outputs/apk/release/app-release-signed.apk \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: genesis-android
           path: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release-signed.apk
           retention-days: 30
