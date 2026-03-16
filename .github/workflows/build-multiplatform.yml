@@ -84,8 +84,10 @@ jobs:
             -alias genesis -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass genesis123 -keypass genesis123 \
             -dname "CN=Genesis,OU=Dev,O=Genesis,L=Unknown,ST=Unknown,C=US"
+          # Find apksigner in Android SDK build-tools
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" -type f | sort -V | tail -1)
           # Sign the APK
-          apksigner sign --ks debug-release.keystore \
+          $APKSIGNER sign --ks debug-release.keystore \
             --ks-key-alias genesis \
             --ks-pass pass:genesis123 \
             --key-pass pass:genesis123 \
