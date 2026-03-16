@@ -5,6 +5,7 @@
 #include <GLES2/gl2.h>
 #include <SDL.h>
 #else
+#include <GL/glew.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
 #endif
@@ -23,9 +24,9 @@ public:
 
     SDL_Window* window = nullptr;
     SDL_GLContext glContext = nullptr;
+    int winWidth, winHeight;
 
 private:
-    int winWidth, winHeight;
 
     // Shader programs
     GLuint circleProgram = 0;

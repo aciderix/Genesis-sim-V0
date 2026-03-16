@@ -129,6 +129,15 @@ bool Renderer::init() {
 
     SDL_GL_SetSwapInterval(1); // VSync
 
+#ifndef GENESIS_ANDROID
+    glewExperimental = GL_TRUE;
+    GLenum glewErr = glewInit();
+    if (glewErr != GLEW_OK) {
+        fprintf(stderr, "GLEW init failed: %s\n", glewGetErrorString(glewErr));
+        return false;
+    }
+#endif
+
     // Compile shaders
     GLuint cvs = compileShader(GL_VERTEX_SHADER, circleVS);
     GLuint cfs = compileShader(GL_FRAGMENT_SHADER, circleFS);
