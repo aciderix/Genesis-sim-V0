@@ -70,7 +70,7 @@ export interface SimSnapshot {
 export function printStatsLine(snap: SimSnapshot, total: number) {
   if (!isTTY) {
     // Simple output for piped mode
-    console.log(`tick=${snap.tick} pop=${snap.population} species=${snap.species} energy=${snap.avgEnergy.toFixed(1)} complexity=${snap.avgComplexity.toFixed(1)} season=${snap.season}`);
+    console.log(`tick=${snap.tick} t=${snap.time.toFixed(1)}s pop=${snap.population} species=${snap.species} energy=${snap.avgEnergy.toFixed(1)} complexity=${snap.avgComplexity.toFixed(1)} season=${snap.season} daylight=${(snap.dayLight*100).toFixed(0)}%`);
     return;
   }
   
