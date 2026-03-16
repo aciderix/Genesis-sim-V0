@@ -1288,3 +1288,55 @@ void Engine::update(float dt) {
         if ((int)state.history.size() > 200) state.history.erase(state.history.begin());
     }
 }
+
+// ═══ Public Tool Methods (for GUI) ════════════════════════════════════════
+
+void Engine::spawnRandomParticlePublic() {
+    if (config.maxParticles > 0 && (int)state.particles.size() >= config.maxParticles) return;
+    spawnRandomParticle();
+}
+
+void Engine::spawnVirusPublic() {
+    Virus v;
+    v.x = randf() * config.width;
+    v.y = randf() * config.height;
+    v.z = config.enable3D ? randf() * config.depth : 0;
+    v.radius = 3;
+    v.life = 10;
+    v.mutationRate = 0.3f + randf() * 0.5f;
+    v.mhcTarget = randi(0, 1000000);
+    v.strain = nextVirusStrain++;
+    state.viruses.push_back(v);
+}
+
+void Engine::spawnVirusAt(float x, float y) {
+    Virus v;
+    v.x = x;
+    v.y = y;
+    v.z = 0;
+    v.radius = 3;
+    v.life = 10;
+    v.mutationRate = 0.3f + randf() * 0.5f;
+    v.mhcTarget = randi(0, 1000000);
+    v.strain = nextVirusStrain++;
+    state.viruses.push_back(v);
+}
+
+void Engine::spawnParticleAt(float x, float y) {
+    if (config.maxParticles > 0 && (int)state.particles.size() >= config.maxParticles) return;
+    Genome genome = randomGenome();
+    int speciesId = nextSpeciesId++;
+    auto traits = getTraits(genome.brain);
+    SpeciesRecord sr;
+    sr.id = speciesId; sr.parentId = 0;
+    sr.color[0] = genome.color[0]; sr.color[1] = genome.color[1]; sr.color[2] = genome.color[2];
+    sr.timestamp = state.time; sr.extinct = false;
+    sr.traitX = traits.traitX; sr.traitY = traits.traitY;
+    sr.trophicLevel = genome.trophicLevel;
+    sr.avgSize = genome.size; sr.population = 1;
+    state.speciesHistory.push_back(sr);
+
+    int id = nextId++;
+    state.particles.push_back(createParticle(id, genome, speciesId, x, y,
+        config.enable3D ? randf() * config.depth : 0));
+}

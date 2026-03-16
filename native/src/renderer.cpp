@@ -534,11 +534,11 @@ void Renderer::render(const SimState& state, const SimConfig& config) {
         }
     }
 
-    // ─── Log Overlay ─────────────────────────────────────────────
-    renderLogOverlay();
+    // ─── Log Overlay (toggled by D key or GUI menu) ─────────────
+    if (showDebugOverlay) renderLogOverlay();
 
     checkGLError("end of render");
-    SDL_GL_SwapWindow(window);
+    // Note: SDL_GL_SwapWindow is called from main.cpp AFTER ImGui rendering
 }
 
 void Renderer::setScreenProjection() {

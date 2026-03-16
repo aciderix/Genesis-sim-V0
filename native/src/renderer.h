@@ -25,6 +25,9 @@ public:
     // Camera
     float camX = 0, camY = 0, camZoom = 1.0f;
 
+    // Debug overlay toggle (D key or GUI menu)
+    bool showDebugOverlay = false;  // Hidden by default
+
     SDL_Window* window = nullptr;
     SDL_GLContext glContext = nullptr;
     int winWidth, winHeight;

@@ -25,6 +25,12 @@ public:
                             float px, float py, float pz, float energy = -1,
                             int generation = 1, int parentId = 0);
 
+    // Public tool methods for GUI
+    void spawnRandomParticlePublic();
+    void spawnVirusPublic();
+    void spawnVirusAt(float x, float y);
+    void spawnParticleAt(float x, float y);
+
 private:
     // Pheromone double-buffer
     std::vector<float> pheromonesBuffer2;
