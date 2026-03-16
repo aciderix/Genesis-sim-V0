@@ -141,3 +141,4 @@ message(STATUS "  SDL2: ${SDL2_LIBRARIES}")
 message(STATUS "  OpenGL: ${OPENGL_LIBRARIES}")
 message(STATUS "  GLEW: ${GLEW_LIBRARIES}")
 message(STATUS "  ImGui: ${IMGUI_DIR}")
+# ImGui GUI integration - trigger native CI
