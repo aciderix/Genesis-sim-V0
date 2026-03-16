@@ -3,6 +3,13 @@
 #include "screenlog.h"
 #include "gui.h"
 #include <cstdio>
+
+// For OpenGL state reset between renderer and ImGui
+#ifdef GENESIS_ANDROID
+#include <GLES2/gl2.h>
+#else
+#include <GL/glew.h>
+#endif
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -288,6 +295,17 @@ int main(int argc, char* argv[]) {
 
         // ─── Render World ────────────────────────────────────
         renderer.render(engine.state, engine.config);
+
+        // ─── Reset OpenGL state for ImGui ────────────────────
+        // The renderer uses custom shaders (glUseProgram) and vertex attribs.
+        // ImGui_ImplOpenGL2 uses the fixed-function pipeline, which requires
+        // glUseProgram(0) to work. Without this reset, ImGui draws nothing.
+        glUseProgram(0);
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+        glDisableVertexAttribArray(2);
+        glDisableVertexAttribArray(3);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         // ─── Render GUI (ImGui overlay) ──────────────────────
         gui.newFrame();

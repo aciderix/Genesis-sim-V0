@@ -507,17 +507,21 @@ void Renderer::render(const SimState& state, const SimConfig& config) {
         const int segments = 32;
         for (auto& s : state.sounds) {
             if (s.volume <= 0) continue;
+            // Clamp alpha to prevent blinding white flashes when volume is high
+            float soundAlpha = std::min(s.volume * 0.08f, 0.4f);
+            // Use a softer color instead of pure white
+            float sr = 0.7f, sg = 0.85f, sb = 1.0f;
             for (int i = 0; i < segments; i++) {
                 float a1 = (float)i / segments * 6.2831853f;
                 float a2 = (float)(i+1) / segments * 6.2831853f;
                 soundData.push_back(s.x + std::cos(a1) * s.radius);
                 soundData.push_back(s.y + std::sin(a1) * s.radius);
-                soundData.push_back(1); soundData.push_back(1);
-                soundData.push_back(1); soundData.push_back(s.volume * 0.15f);
+                soundData.push_back(sr); soundData.push_back(sg);
+                soundData.push_back(sb); soundData.push_back(soundAlpha);
                 soundData.push_back(s.x + std::cos(a2) * s.radius);
                 soundData.push_back(s.y + std::sin(a2) * s.radius);
-                soundData.push_back(1); soundData.push_back(1);
-                soundData.push_back(1); soundData.push_back(s.volume * 0.15f);
+                soundData.push_back(sr); soundData.push_back(sg);
+                soundData.push_back(sb); soundData.push_back(soundAlpha);
             }
         }
         if (!soundData.empty()) {
@@ -536,6 +540,14 @@ void Renderer::render(const SimState& state, const SimConfig& config) {
 
     // ─── Log Overlay (toggled by D key or GUI menu) ─────────────
     if (showDebugOverlay) renderLogOverlay();
+
+    // Reset vertex attrib state so ImGui's fixed-function pipeline works
+    glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
+    glDisableVertexAttribArray(2);
+    glDisableVertexAttribArray(3);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glUseProgram(0);
 
     checkGLError("end of render");
     // Note: SDL_GL_SwapWindow is called from main.cpp AFTER ImGui rendering
