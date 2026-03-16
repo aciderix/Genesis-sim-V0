@@ -35,25 +35,38 @@ int main(int argc, char* argv[]) {
 
     // ─── Simulation Config ────────────────────────────────────────
     SimConfig config;
+#ifdef GENESIS_ANDROID
+    // Reduced parameters for mobile performance
+    config.width = 800;
+    config.height = 600;
+    config.depth = 200;
+    config.initialParticles = 80;
+    config.maxParticles = 500;
+    config.nutrientSpawnRate = 5.0f;
+    config.virusSpawnRate = 0.2f;
+    config.enableMorphogens = false;      // Disable heavy field updates
+    config.enableTemperature = false;     // Disable heavy field updates
+#else
     config.width = 1200;
     config.height = 800;
     config.depth = 400;
     config.initialParticles = 300;
     config.maxParticles = 2000;
+    config.nutrientSpawnRate = 10.0f;
+    config.virusSpawnRate = 0.5f;
+    config.enableMorphogens = true;
+    config.enableTemperature = true;
+#endif
     config.friction = 0.92f;
     config.repulsion = 20.0f;
-    config.nutrientSpawnRate = 10.0f;
     config.mutationRate = 0.1f;
     config.enable3D = false;
     config.enableAbiogenesis = false;
     config.enableImmuneSystem = true;
     config.enableEpigenetics = true;
-    config.enableMorphogens = true;
-    config.enableTemperature = true;
     config.enableTrophicLevels = true;
     config.gravity = 0.5f;
     config.ambientTemperature = 25.0f;
-    config.virusSpawnRate = 0.5f;
     config.worldScale = 1.0f;
 
     // ─── Init Engine ──────────────────────────────────────────────
@@ -61,7 +74,11 @@ int main(int argc, char* argv[]) {
     printf("Genesis 3.0 Native — %d particles initialized\n", (int)engine.state.particles.size());
 
     // ─── Init Renderer ────────────────────────────────────────────
+#ifdef GENESIS_ANDROID
+    Renderer renderer(0, 0); // Will get actual size from SDL window
+#else
     Renderer renderer(1280, 800);
+#endif
     if (!renderer.init()) {
         fprintf(stderr, "Failed to init renderer\n");
         return 1;

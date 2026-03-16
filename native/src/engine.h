@@ -48,6 +48,10 @@ private:
     // Frame counter for throttling
     int frameCount = 0;
 
+    // Deferred buffers to avoid vector invalidation during iteration
+    std::vector<Particle> pendingBirths;
+    std::vector<Nutrient> pendingNutrients;
+
     // DNA & Genome
     DNA randomDNA();
     Genome randomGenome();

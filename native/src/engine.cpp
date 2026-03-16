@@ -65,6 +65,13 @@ Engine::Engine(const SimConfig& cfg) : config(cfg) {
     state.zones.push_back({400, 700, 0, 80, ZoneType::ThermalVent, 0,0,0, 80, 1.0f});
     state.zones.push_back({900, 500, 0, 100, ZoneType::NutrientRich, 0,0,0, 0, 2.0f});
 
+    // Pre-reserve to reduce reallocations
+    state.particles.reserve(config.maxParticles);
+    state.nutrients.reserve(500);
+    state.bonds.reserve(1000);
+    pendingBirths.reserve(64);
+    pendingNutrients.reserve(64);
+
     init();
 }
 
@@ -419,7 +426,7 @@ Genome Engine::mutateGenome(const Genome& genome) {
 
 // ═══ Reproduction ═════════════════════════════════════════════════════════
 void Engine::reproduce(Particle& p, Particle* mate) {
-    if (config.maxParticles > 0 && (int)state.particles.size() >= config.maxParticles) return;
+    if (config.maxParticles > 0 && (int)(state.particles.size() + pendingBirths.size()) >= config.maxParticles) return;
     if (p.divisionsLeft <= 0) return;
 
     p.energy -= 40;
@@ -448,7 +455,8 @@ void Engine::reproduce(Particle& p, Particle* mate) {
 
     int childId = nextId++;
     int mateGen = mate ? mate->generation : 0;
-    state.particles.push_back(createParticle(childId, finalGenome, speciesId,
+    // Defer birth to avoid vector reallocation during iteration
+    pendingBirths.push_back(createParticle(childId, finalGenome, speciesId,
         p.x + randf(-5, 5), p.y + randf(-5, 5),
         p.z + (config.enable3D ? randf(-5, 5) : 0),
         childEnergy, std::max(p.generation, mateGen) + 1, p.id));
@@ -1026,7 +1034,7 @@ void Engine::update(float dt) {
                     std::memcpy(corpse.chemicalContent, target->chem, sizeof(float) * NUM_CHEMICALS);
                     corpse.temperature = target->temperature;
                     corpse.trophicValue = target->trophicLevel;
-                    state.nutrients.push_back(corpse);
+                    pendingNutrients.push_back(corpse);
                 }
             }
         }
@@ -1147,9 +1155,17 @@ void Engine::update(float dt) {
             std::memcpy(corpse.chemicalContent, p.chem, sizeof(float) * NUM_CHEMICALS);
             corpse.temperature = p.temperature;
             corpse.trophicValue = p.trophicLevel;
-            state.nutrients.push_back(corpse);
+            pendingNutrients.push_back(corpse);
         }
     }
+
+    // Flush deferred births and nutrients
+    for (auto& baby : pendingBirths)
+        state.particles.push_back(std::move(baby));
+    pendingBirths.clear();
+    for (auto& n : pendingNutrients)
+        state.nutrients.push_back(std::move(n));
+    pendingNutrients.clear();
 
     // Nutrient decay
     for (auto& n : state.nutrients) {
