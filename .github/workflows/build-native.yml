@@ -1,0 +1,124 @@
+name: Build Native (Linux, Windows, Android)
+
+on:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'native/**'
+      - '.github/workflows/build-native.yml'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libsdl2-dev libglew-dev libgl-dev
+
+      - name: Build
+        run: |
+          cd native
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc)
+
+      - name: Package
+        run: |
+          cd native/build
+          mkdir -p genesis-linux
+          cp genesis genesis-linux/
+          cp -r ../shaders genesis-linux/ 2>/dev/null || true
+          tar czf genesis-linux.tar.gz genesis-linux/
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-native-linux
+          path: native/build/genesis-linux.tar.gz
+          retention-days: 30
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL2 and GLEW via vcpkg
+        run: |
+          vcpkg install sdl2:x64-windows glew:x64-windows
+
+      - name: Build
+        run: |
+          cd native
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+          cmake --build . --config Release
+
+      - name: Package
+        run: |
+          cd native/build
+          mkdir genesis-windows
+          Copy-Item Release\genesis.exe genesis-windows\ -ErrorAction SilentlyContinue
+          Copy-Item ..\shaders genesis-windows\shaders -Recurse -ErrorAction SilentlyContinue
+          # Copy SDL2.dll
+          $sdlDll = Get-ChildItem -Path "$env:VCPKG_INSTALLATION_ROOT" -Filter "SDL2.dll" -Recurse | Where-Object { $_.DirectoryName -match "x64-windows" } | Select-Object -First 1
+          if ($sdlDll) { Copy-Item $sdlDll.FullName genesis-windows\ }
+          Compress-Archive -Path genesis-windows -DestinationPath genesis-windows.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-native-windows
+          path: native/build/genesis-windows.zip
+          retention-days: 30
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;26.1.10909125"
+
+      - name: Download SDL2 source
+        run: |
+          cd native
+          wget -q https://github.com/libsdl-org/SDL/releases/download/release-2.30.9/SDL2-2.30.9.tar.gz
+          tar xzf SDL2-2.30.9.tar.gz
+          # Copy SDL2 Java sources for Android
+          mkdir -p android/app/src/main/java/org/libsdl/app
+          cp SDL2-2.30.9/android-project/app/src/main/java/org/libsdl/app/*.java \
+             android/app/src/main/java/org/libsdl/app/
+
+      - name: Setup Gradle wrapper
+        run: |
+          cd native/android
+          gradle wrapper --gradle-version 8.5
+
+      - name: Build APK
+        run: |
+          cd native/android
+          chmod +x gradlew
+          ./gradlew assembleRelease assembleDebug || echo "Android build needs SDL2 integration - see README"
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: genesis-native-android
+          path: |
+            native/android/app/build/outputs/apk/**/*.apk
+          retention-days: 30

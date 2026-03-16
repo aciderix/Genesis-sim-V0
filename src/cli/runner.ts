@@ -10,6 +10,7 @@ import { SimSnapshot, printStatsLine } from './reporter';
 export interface RunOptions {
   ticks: number;
   dt: number;
+  speed: number;     // Speed multiplier: run N engine updates per tick (like web's speedMultiplier)
   config: SimConfig;
   interval: number;  // Print stats every N ticks (0 = silent)
   quiet: boolean;
@@ -59,13 +60,15 @@ export function takeSnapshot(engine: Engine, tick: number): SimSnapshot {
  * Returns the engine (with full state) and performance metrics.
  */
 export function runSimulation(options: RunOptions): RunResult {
-  const { ticks, dt, config, interval, quiet, onTick } = options;
+  const { ticks, dt, speed, config, interval, quiet, onTick } = options;
   const engine = new Engine(config);
 
   const startTime = performance.now();
 
   for (let tick = 1; tick <= ticks; tick++) {
-    engine.update(dt);
+    for (let s = 0; s < speed; s++) {
+      engine.update(dt);
+    }
 
     if (interval > 0 && tick % interval === 0) {
       const snap = takeSnapshot(engine, tick);
@@ -114,11 +117,13 @@ export function runFromState(state: SimState, config: SimConfig, options: Omit<R
   for (const s of state.speciesHistory) if (s.id > maxSpeciesId) maxSpeciesId = s.id;
   engine.nextSpeciesId = maxSpeciesId + 1;
 
-  const { ticks, dt, interval, quiet, onTick } = options;
+  const { ticks, dt, speed, interval, quiet, onTick } = options;
   const startTime = performance.now();
 
   for (let tick = 1; tick <= ticks; tick++) {
-    engine.update(dt);
+    for (let s = 0; s < speed; s++) {
+      engine.update(dt);
+    }
 
     if (interval > 0 && tick % interval === 0) {
       const snap = takeSnapshot(engine, tick);
@@ -146,12 +151,24 @@ export function defaultConfig(overrides?: Partial<SimConfig>): SimConfig {
   return {
     width: 1200,
     height: 800,
+    depth: 400,
     initialParticles: 300,
     maxParticles: 2000,
     friction: 0.92,
     repulsion: 20.0,
     nutrientSpawnRate: 10.0,
     mutationRate: 0.1,
+    enable3D: false,
+    enableAbiogenesis: false,
+    enableImmuneSystem: true,
+    enableEpigenetics: true,
+    enableMorphogens: true,
+    enableTemperature: true,
+    enableTrophicLevels: true,
+    gravity: 0.5,
+    ambientTemperature: 25,
+    virusSpawnRate: 0.5,
+    worldScale: 1.0,
     ...overrides,
   };
 }

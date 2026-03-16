@@ -1,0 +1,58 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicoverali/tauri-plugin-serialport/refs/heads/v2/schemas/tauri.conf.json",
+  "productName": "Genesis Simulator",
+  "version": "3.0.0",
+  "identifier": "com.genesis.simulator",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Genesis 3.0 - Revolutionary Life Simulator",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "nsis", "msi"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Education",
+    "shortDescription": "Revolutionary artificial life simulator with DNA genetics, trophic ecology, immune systems, and 3D physics",
+    "longDescription": "Genesis 3.0 is a cutting-edge artificial life simulator featuring synthetic DNA, epigenetics, trophic food chains, immune systems, morphogen signaling (Turing patterns), temperature fields, abiogenesis mode, and full 3D physics. Experience emergent evolution like never before.",
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    }
+  }
+}

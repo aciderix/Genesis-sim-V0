@@ -84,6 +84,7 @@ function getBool(flags: Record<string, string | boolean>, key: string): boolean 
 function cmdRun(flags: Record<string, string | boolean>, positional: string[]) {
   const ticks = getNum(flags, 'ticks', 1000);
   const dt = getNum(flags, 'dt', 0.016);
+  const speed = getNum(flags, 'speed', 1);
   const interval = getNum(flags, 'interval', 50);
   const quiet = getBool(flags, 'quiet') || getBool(flags, 'q');
   const output = getStr(flags, 'output', '') || getStr(flags, 'o', '');
@@ -107,7 +108,7 @@ function cmdRun(flags: Record<string, string | boolean>, positional: string[]) {
   if (!quiet) {
     banner();
     console.log(`  ${c.dim}Config:${c.reset} ${c.white}${config.initialParticles}${c.reset} particles, ${c.white}${config.width}x${config.height}${c.reset} world`);
-    console.log(`  ${c.dim}Run:${c.reset}    ${c.white}${formatNumber(ticks)}${c.reset} ticks @ dt=${c.white}${dt}${c.reset}, interval=${c.white}${interval}${c.reset}`);
+    console.log(`  ${c.dim}Run:${c.reset}    ${c.white}${formatNumber(ticks)}${c.reset} ticks @ dt=${c.white}${dt}${c.reset}, speed=${c.white}${speed}x${c.reset}, interval=${c.white}${interval}${c.reset}`);
     console.log('');
   }
 
@@ -118,9 +119,9 @@ function cmdRun(flags: Record<string, string | boolean>, positional: string[]) {
     const stateJson = fs.readFileSync(loadFile, 'utf-8');
     const state = JSON.parse(stateJson) as SimState;
     if (!quiet) console.log(`  ${c.green}✓${c.reset} Loaded: pop=${state.particles.length}, time=${state.time.toFixed(0)}s\n`);
-    result = runFromState(state, config, { ticks, dt, interval, quiet });
+    result = runFromState(state, config, { ticks, dt, speed, interval, quiet });
   } else {
-    result = runSimulation({ ticks, dt, config, interval, quiet });
+    result = runSimulation({ ticks, dt, speed, config, interval, quiet });
   }
 
   if (!quiet) {
@@ -163,7 +164,7 @@ function cmdBenchmark(flags: Record<string, string | boolean>) {
 
   for (let run = 0; run < runs; run++) {
     process.stdout.write(`  ${c.dim}Run ${run + 1}/${runs}...${c.reset}`);
-    const result = runSimulation({ ticks, dt: 0.016, config, interval: 0, quiet: true });
+    const result = runSimulation({ ticks, dt: 0.016, speed: 1, config, interval: 0, quiet: true });
     results.push({
       ticks,
       totalMs: result.totalMs,
@@ -224,7 +225,7 @@ function cmdBatch(flags: Record<string, string | boolean>, positional: string[])
 
     process.stdout.write(`  ${c.cyan}[${i + 1}/${scenarios.length}]${c.reset} ${c.white}${name}${c.reset} (${formatNumber(ticks)} ticks, pop=${config.initialParticles})... `);
 
-    const result = runSimulation({ ticks, dt, config, interval: 0, quiet: true });
+    const result = runSimulation({ ticks, dt, speed: scenario.speed || 1, config, interval: 0, quiet: true });
     allResults.push({ name, result });
 
     console.log(`${c.green}✓${c.reset} ${formatDuration(result.totalMs)} | pop=${result.finalSnapshot.population} species=${result.finalSnapshot.species}`);
@@ -377,6 +378,7 @@ ${c.bold}Commands:${c.reset}
   ${c.cyan}run${c.reset}              Run a headless simulation
     --ticks <n>        Number of ticks (default: 1000)
     --dt <n>           Delta time per tick (default: 0.016)
+    --speed <n>        Speed multiplier: N engine updates per tick (default: 1)
     --population <n>   Initial population (default: 300)
     --max-particles <n> Max particles (default: 2000, 0 = unlimited)
     --width <n>        World width (default: 1200)
