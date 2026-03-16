@@ -5,6 +5,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <unistd.h>
 
 #ifdef GENESIS_ANDROID
 #include <SDL.h>
@@ -14,11 +15,21 @@
 #endif
 
 // Signal handler for crash diagnostics
+static Engine* g_engine = nullptr;
 static void signalHandler(int sig) {
-    SLOG_ERROR("!!! CRASH SIGNAL %d (SEGV=%d ABRT=%d FPE=%d) !!!",
-               sig, SIGSEGV, SIGABRT, SIGFPE);
+    // Prevent recursive signals
+    signal(sig, SIG_DFL);
+    if (g_engine) {
+        SLOG_ERROR("!!! CRASH sig=%d section=%d particle=%d pop=%d bonds=%d nutr=%d !!!",
+                   sig, g_engine->crashSection, g_engine->crashParticleIdx,
+                   (int)g_engine->state.particles.size(),
+                   (int)g_engine->state.bonds.size(),
+                   (int)g_engine->state.nutrients.size());
+    } else {
+        SLOG_ERROR("!!! CRASH SIGNAL %d (no engine) !!!", sig);
+    }
     ScreenLog::get().flush();
-    std::abort();
+    _exit(1);
 }
 
 int main(int argc, char* argv[]) {
@@ -74,6 +85,7 @@ int main(int argc, char* argv[]) {
     SLOG_INFO("Engine: %dx%d, %d particles, max=%d",
               config.width, config.height, config.initialParticles, config.maxParticles);
     Engine engine(config);
+    g_engine = &engine;
     SLOG_OK("Engine OK: %d particles, %d nutrients",
             (int)engine.state.particles.size(), (int)engine.state.nutrients.size());
 

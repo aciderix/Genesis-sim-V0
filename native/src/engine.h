@@ -40,6 +40,12 @@ private:
     float nnHidden[NEURAL_HIDDEN];
     float nnOutputs[NEURAL_OUTPUTS];
 
+public:
+    // Crash diagnostics (public so signal handler can read)
+    volatile int crashSection = 0;
+    volatile int crashParticleIdx = -1;
+private:
+
     // Particle map for bonds
     std::unordered_map<int, Particle*> particleMap;
     std::unordered_set<int64_t> bondSet;

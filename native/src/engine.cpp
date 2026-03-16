@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "screenlog.h"
 #include <cstring>
 #include <cmath>
 #include <set>
@@ -644,6 +645,12 @@ float Engine::getTemperatureAt(float x, float y) const {
 void Engine::update(float dt) {
     state.time += dt;
     frameCount++;
+    // Crash diagnostic: track which section we're in
+    auto section = [&](int s, const char* name) {
+        crashSection = s;
+        if (frameCount <= 2 || frameCount % 60 == 0)
+            SLOG_INFO("  [S%d] %s", s, name);
+    };
 
     // Seasons & Daylight
     float yearLength = 120.0f;
@@ -669,6 +676,7 @@ void Engine::update(float dt) {
     state.oxygenLevel = clampf(state.oxygenLevel + (totalPhotosynthesis * 0.0001f - totalRespiration * 0.00005f) * dt, 0.05f, 0.4f);
     state.co2Level = clampf(state.co2Level + (totalRespiration * 0.00005f - totalPhotosynthesis * 0.0001f) * dt, 0.01f, 0.2f);
 
+    section(1, "fields");
     // Throttled field updates
     if (frameCount % 3 == 0) updateOrganisms();
     if (frameCount % 2 == 0) updatePheromones(dt * 2);
@@ -696,6 +704,7 @@ void Engine::update(float dt) {
     if (state.abiogenesisMode && (int)state.particles.size() < 50 && randf() < dt * 0.5f)
         spawnProtocell();
 
+    section(2, "grids");
     // ─── Build spatial grids ──────────────────────────────────────
     int cols = gridCols, rows = gridRows;
     for (auto& cell : grid) cell.clear();
@@ -719,6 +728,7 @@ void Engine::update(float dt) {
     bondSet.clear();
     for (auto& b : state.bonds) bondSet.insert(bkey(b.p1, b.p2));
 
+    section(3, "viruses");
     // ─── Viruses ──────────────────────────────────────────────────
     if (randf() < config.virusSpawnRate * dt) {
         Virus v;
@@ -803,8 +813,10 @@ void Engine::update(float dt) {
         }
     }
 
+    section(5, "particles");
     // ═══ PARTICLE UPDATE LOOP ═════════════════════════════════════
     for (int pi = 0; pi < (int)state.particles.size(); pi++) {
+        crashParticleIdx = pi;
         Particle& p = state.particles[pi];
         if (p.dead) continue;
 
@@ -1162,6 +1174,7 @@ void Engine::update(float dt) {
         }
     }
 
+    section(6, "bonds");
     // ─── Bond springs (BEFORE flush, so particleMap pointers are valid) ──
     int bondWrite = 0;
     for (int i = 0; i < (int)state.bonds.size(); i++) {
@@ -1204,6 +1217,7 @@ void Engine::update(float dt) {
     }
     state.bonds.resize(bondWrite);
 
+    section(7, "flush");
     // Flush deferred births and nutrients (AFTER bond springs to avoid
     // invalidating particleMap pointers via vector reallocation)
     for (auto& baby : pendingBirths)
@@ -1234,6 +1248,7 @@ void Engine::update(float dt) {
     for (auto& s : state.speciesHistory)
         if (!s.extinct && activeSpecies.find(s.id) == activeSpecies.end()) s.extinct = true;
 
+    section(8, "cleanup");
     // In-place dead particle removal
     int pWrite = 0;
     for (int i = 0; i < (int)state.particles.size(); i++)
