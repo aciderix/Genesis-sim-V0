@@ -1162,30 +1162,7 @@ void Engine::update(float dt) {
         }
     }
 
-    // Flush deferred births and nutrients
-    for (auto& baby : pendingBirths)
-        state.particles.push_back(std::move(baby));
-    pendingBirths.clear();
-    for (auto& n : pendingNutrients)
-        state.nutrients.push_back(std::move(n));
-    pendingNutrients.clear();
-
-    // Nutrient decay
-    for (auto& n : state.nutrients) {
-        if (n.isCorpse) {
-            n.amount -= dt * 2;
-            addPheromoneAt(n.x, n.y, -10 * dt);
-            if (n.amount < 20) n.isCorpse = false;
-        }
-    }
-    // In-place nutrient removal
-    int nWrite = 0;
-    for (int i = 0; i < (int)state.nutrients.size(); i++)
-        if (state.nutrients[i].amount > 0)
-            state.nutrients[nWrite++] = state.nutrients[i];
-    state.nutrients.resize(nWrite);
-
-    // ─── Bond springs ─────────────────────────────────────────────
+    // ─── Bond springs (BEFORE flush, so particleMap pointers are valid) ──
     int bondWrite = 0;
     for (int i = 0; i < (int)state.bonds.size(); i++) {
         auto& b = state.bonds[i];
@@ -1226,6 +1203,30 @@ void Engine::update(float dt) {
         state.bonds[bondWrite++] = b;
     }
     state.bonds.resize(bondWrite);
+
+    // Flush deferred births and nutrients (AFTER bond springs to avoid
+    // invalidating particleMap pointers via vector reallocation)
+    for (auto& baby : pendingBirths)
+        state.particles.push_back(std::move(baby));
+    pendingBirths.clear();
+    for (auto& n : pendingNutrients)
+        state.nutrients.push_back(std::move(n));
+    pendingNutrients.clear();
+
+    // Nutrient decay
+    for (auto& n : state.nutrients) {
+        if (n.isCorpse) {
+            n.amount -= dt * 2;
+            addPheromoneAt(n.x, n.y, -10 * dt);
+            if (n.amount < 20) n.isCorpse = false;
+        }
+    }
+    // In-place nutrient removal
+    int nWrite = 0;
+    for (int i = 0; i < (int)state.nutrients.size(); i++)
+        if (state.nutrients[i].amount > 0)
+            state.nutrients[nWrite++] = state.nutrients[i];
+    state.nutrients.resize(nWrite);
 
     // Species tracking
     activeSpecies.clear();
