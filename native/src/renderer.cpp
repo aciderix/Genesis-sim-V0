@@ -1,23 +1,15 @@
 #include "renderer.h"
+#include "screenlog.h"
+#include "fontdata.h"
 #include <cstdio>
 #include <cmath>
 #include <vector>
 #include <cstring>
 
-#ifdef GENESIS_ANDROID
-#include <android/log.h>
-#define LOG_TAG "GenesisGL"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#else
-#define LOGI(...) printf(__VA_ARGS__); printf("\n")
-#define LOGE(...) fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n")
-#endif
-
 static void checkGLError(const char* label) {
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
-        LOGE("GL error at %s: 0x%04x", label, err);
+        SLOG_ERROR("GL error at %s: 0x%04x", label, err);
     }
 }
 
@@ -108,12 +100,12 @@ Renderer::~Renderer() {
 }
 
 bool Renderer::init() {
-    LOGI("Renderer::init() - SDL_Init...");
+    SLOG_INFO("Renderer::init() - SDL_Init...");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) {
-        LOGE("SDL init failed: %s", SDL_GetError());
+        SLOG_ERROR("SDL init failed: %s", SDL_GetError());
         return false;
     }
-    LOGI("SDL_Init OK");
+    SLOG_INFO("SDL_Init OK");
 
 #ifdef GENESIS_ANDROID
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -130,27 +122,27 @@ bool Renderer::init() {
 
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
-    LOGI("Creating window %dx%d flags=0x%x", winWidth, winHeight, flags);
+    SLOG_INFO("Creating window %dx%d flags=0x%x", winWidth, winHeight, flags);
     window = SDL_CreateWindow("Genesis 3.0 - Native",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         winWidth, winHeight, flags);
     if (!window) {
-        LOGE("Window creation failed: %s", SDL_GetError());
+        SLOG_ERROR("Window creation failed: %s", SDL_GetError());
         return false;
     }
 
 #ifdef GENESIS_ANDROID
     SDL_GetWindowSize(window, &winWidth, &winHeight);
-    LOGI("Android actual window size: %dx%d", winWidth, winHeight);
+    SLOG_INFO("Android actual window size: %dx%d", winWidth, winHeight);
 #endif
 
-    LOGI("Creating GL context...");
+    SLOG_INFO("Creating GL context...");
     glContext = SDL_GL_CreateContext(window);
     if (!glContext) {
-        LOGE("GL context creation failed: %s", SDL_GetError());
+        SLOG_ERROR("GL context creation failed: %s", SDL_GetError());
         return false;
     }
-    LOGI("GL context created");
+    SLOG_INFO("GL context created");
 
     SDL_GL_SetSwapInterval(1); // VSync
 
@@ -180,11 +172,11 @@ bool Renderer::init() {
     glDeleteShader(qvs); glDeleteShader(qfs);
 
     if (!circleProgram || !lineProgram || !quadProgram) {
-        LOGE("Shader program creation failed: circle=%u line=%u quad=%u",
+        SLOG_ERROR("Shader program creation failed: circle=%u line=%u quad=%u",
              circleProgram, lineProgram, quadProgram);
         return false;
     }
-    LOGI("All shaders compiled and linked OK");
+    SLOG_INFO("All shaders compiled and linked OK");
     checkGLError("after shaders");
 
     glGenBuffers(1, &circleVBO);
@@ -194,7 +186,7 @@ bool Renderer::init() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    LOGI("Renderer::init() complete, VBOs: circle=%u line=%u quad=%u", circleVBO, lineVBO, quadVBO);
+    SLOG_INFO("Renderer::init() complete, VBOs: circle=%u line=%u quad=%u", circleVBO, lineVBO, quadVBO);
     checkGLError("init end");
 
     return true;
@@ -208,7 +200,7 @@ GLuint Renderer::compileShader(GLenum type, const char* source) {
     if (!ok) {
         char log[512];
         glGetShaderInfoLog(shader, 512, nullptr, log);
-        fprintf(stderr, "Shader compile error: %s\n", log);
+        SLOG_ERROR("Shader compile error: %s", log);
         return 0;
     }
     return shader;
@@ -228,7 +220,7 @@ GLuint Renderer::linkProgram(GLuint vs, GLuint fs) {
     if (!ok) {
         char log[512];
         glGetProgramInfoLog(prog, 512, nullptr, log);
-        fprintf(stderr, "Program link error: %s\n", log);
+        SLOG_ERROR("Program link error: %s", log);
         return 0;
     }
     return prog;
@@ -274,7 +266,7 @@ void Renderer::render(const SimState& state, const SimConfig& config) {
     static int renderFrame = 0;
     renderFrame++;
     if (renderFrame <= 5 || renderFrame % 60 == 0) {
-        LOGI("render() frame=%d particles=%d nutrients=%d bonds=%d viruses=%d sounds=%d",
+        SLOG_INFO("render() frame=%d particles=%d nutrients=%d bonds=%d viruses=%d sounds=%d",
              renderFrame, (int)state.particles.size(), (int)state.nutrients.size(),
              (int)state.bonds.size(), (int)state.viruses.size(), (int)state.sounds.size());
     }
@@ -542,6 +534,117 @@ void Renderer::render(const SimState& state, const SimConfig& config) {
         }
     }
 
+    // ─── Log Overlay ─────────────────────────────────────────────
+    renderLogOverlay();
+
     checkGLError("end of render");
     SDL_GL_SwapWindow(window);
+}
+
+void Renderer::setScreenProjection() {
+    // Pixel-space orthographic projection (no camera transform)
+    float proj[16] = {0};
+    proj[0] = 2.0f / (float)winWidth;
+    proj[5] = -2.0f / (float)winHeight;  // Y down
+    proj[10] = -1.0f;
+    proj[12] = -1.0f;
+    proj[13] = 1.0f;
+    proj[15] = 1.0f;
+
+    GLint loc;
+    glUseProgram(quadProgram);
+    loc = glGetUniformLocation(quadProgram, "uProj");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, proj);
+}
+
+void Renderer::renderLogOverlay() {
+    auto& slog = ScreenLog::get();
+    int lineCount = slog.getLineCount();
+    if (lineCount == 0) return;
+
+    setScreenProjection();
+    glUseProgram(quadProgram);
+
+    // Pixel size for font: scale factor for readability on high-DPI
+    float scale = (float)winWidth / 400.0f;  // ~3x on 1080p, ~2x on 720p
+    if (scale < 1.5f) scale = 1.5f;
+    if (scale > 4.0f) scale = 4.0f;
+    float pxW = scale;       // pixel width
+    float pxH = scale;       // pixel height
+    float charW = 6 * pxW;   // 5 cols + 1 gap
+    float charH = 8 * pxH;   // 7 rows + 1 gap
+    float padX = 4 * scale;
+    float padY = 4 * scale;
+
+    // Show last N lines that fit on screen
+    int maxVisible = (int)((winHeight * 0.6f) / charH);
+    if (maxVisible > lineCount) maxVisible = lineCount;
+    int startLine = lineCount - maxVisible;
+
+    // Background box
+    float bgW = winWidth * 0.95f;
+    float bgH = maxVisible * charH + padY * 2;
+    float bgX = (winWidth - bgW) / 2;
+    float bgY = winHeight - bgH - padY;
+
+    // Build quad data for background
+    std::vector<float> quadData;
+
+    // Dark semi-transparent background
+    auto addRect = [&](float x, float y, float w, float h, float r, float g, float b, float a) {
+        float verts[] = {
+            x, y,         x+w, y,       x+w, y+h,
+            x, y,         x+w, y+h,     x, y+h
+        };
+        for (int i = 0; i < 6; i++) {
+            quadData.push_back(verts[i*2]);
+            quadData.push_back(verts[i*2+1]);
+            quadData.push_back(r); quadData.push_back(g);
+            quadData.push_back(b); quadData.push_back(a);
+        }
+    };
+
+    // Background
+    addRect(bgX, bgY, bgW, bgH, 0.0f, 0.0f, 0.0f, 0.75f);
+
+    // Render each line's characters
+    for (int li = 0; li < maxVisible; li++) {
+        auto& line = slog.getLine(startLine + li);
+        float textX = bgX + padX;
+        float textY = bgY + padY + li * charH;
+
+        for (int ci = 0; line.text[ci] && ci < ScreenLog::MAX_LINE_LEN; ci++) {
+            unsigned char ch = (unsigned char)line.text[ci];
+            if (ch < 32 || ch > 126) ch = '?';
+            const uint8_t* glyph = FONT_5X7[ch - 32];
+
+            for (int col = 0; col < 5; col++) {
+                uint8_t colBits = glyph[col];
+                for (int row = 0; row < 7; row++) {
+                    if (colBits & (1 << row)) {
+                        float px = textX + col * pxW;
+                        float py = textY + row * pxH;
+                        addRect(px, py, pxW, pxH, line.r, line.g, line.b, 1.0f);
+                    }
+                }
+            }
+            textX += charW;
+        }
+    }
+
+    if (!quadData.empty()) {
+        glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+        glBufferData(GL_ARRAY_BUFFER, quadData.size() * sizeof(float), quadData.data(), GL_DYNAMIC_DRAW);
+        int stride = 6 * sizeof(float);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (void*)0);
+        glDisableVertexAttribArray(1);
+        glDisableVertexAttribArray(2);
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride, (void*)(2*sizeof(float)));
+        glDrawArrays(GL_TRIANGLES, 0, (int)(quadData.size() / 6));
+    }
+
+    // Restore world projection for next frame
+    setProjection();
 }

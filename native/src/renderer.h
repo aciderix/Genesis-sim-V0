@@ -19,6 +19,9 @@ public:
     void render(const SimState& state, const SimConfig& config);
     void handleResize(int w, int h);
 
+    // Render the on-screen debug log overlay
+    void renderLogOverlay();
+
     // Camera
     float camX = 0, camY = 0, camZoom = 1.0f;
 
@@ -47,6 +50,9 @@ private:
     void drawLine(float x1, float y1, float x2, float y2, float r, float g, float b, float a);
     void drawLineBatch(const float* data, int count); // x1,y1,x2,y2,r,g,b,a
     void drawQuad(float x, float y, float w, float h, float r, float g, float b, float a);
+
+    // Text rendering helpers
+    void setScreenProjection();  // pixel-space ortho (no camera)
 
     // Projection
     void setProjection();

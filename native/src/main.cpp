@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "renderer.h"
+#include "screenlog.h"
 #include <cstdio>
 #include <chrono>
 #include <csignal>
@@ -8,43 +9,16 @@
 #ifdef GENESIS_ANDROID
 #include <SDL.h>
 #include <android/log.h>
-#define LOG_TAG "Genesis"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #else
 #include <SDL2/SDL.h>
-#define LOGI(...) printf(__VA_ARGS__); printf("\n")
-#define LOGW(...) printf("[WARN] "); printf(__VA_ARGS__); printf("\n")
-#define LOGE(...) fprintf(stderr, "[ERROR] "); fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n")
 #endif
 
 // Signal handler for crash diagnostics
 static void signalHandler(int sig) {
-    LOGE("!!! SIGNAL %d received (SIGSEGV=%d, SIGABRT=%d, SIGFPE=%d) !!!", sig, SIGSEGV, SIGABRT, SIGFPE);
+    SLOG_ERROR("!!! CRASH SIGNAL %d (SEGV=%d ABRT=%d FPE=%d) !!!",
+               sig, SIGSEGV, SIGABRT, SIGFPE);
+    ScreenLog::get().flush();
     std::abort();
-}
-
-
-static void printStats(const SimState& state) {
-    int autotrophs = 0, herbivores = 0, predators = 0, decomposers = 0;
-    float totalEnergy = 0;
-    for (auto& p : state.particles) {
-        totalEnergy += p.energy;
-        switch (p.trophicLevel) {
-            case TrophicLevel::Autotroph: autotrophs++; break;
-            case TrophicLevel::Herbivore: herbivores++; break;
-            case TrophicLevel::Predator: predators++; break;
-            case TrophicLevel::Decomposer: decomposers++; break;
-            default: break;
-        }
-    }
-    printf("\rT=%.0f Pop=%d (A:%d H:%d P:%d D:%d) E=%.0f Bonds=%d Virus=%d %s  ",
-        state.time, (int)state.particles.size(),
-        autotrophs, herbivores, predators, decomposers,
-        totalEnergy, (int)state.bonds.size(), (int)state.viruses.size(),
-        state.season.c_str());
-    fflush(stdout);
 }
 
 int main(int argc, char* argv[]) {
@@ -54,7 +28,38 @@ int main(int argc, char* argv[]) {
     signal(SIGABRT, signalHandler);
     signal(SIGFPE, signalHandler);
 
-    LOGI("=== Genesis 3.0 Native starting ===");
+    // ─── Init Log File ───────────────────────────────────────────
+#ifdef GENESIS_ANDROID
+    // Try Downloads, fallback to app internal storage
+    const char* downloadPaths[] = {
+        "/sdcard/Download",
+        "/storage/emulated/0/Download",
+        "/sdcard/Documents",
+        "/storage/emulated/0/Documents",
+        nullptr
+    };
+    const char* logDir = nullptr;
+    for (int i = 0; downloadPaths[i]; i++) {
+        FILE* test = fopen(downloadPaths[i], "r");
+        // Check dir exists by trying a temp file
+        char tmp[256];
+        snprintf(tmp, sizeof(tmp), "%s/.genesis_test", downloadPaths[i]);
+        FILE* tf = fopen(tmp, "w");
+        if (tf) { fclose(tf); remove(tmp); logDir = downloadPaths[i]; break; }
+    }
+    if (!logDir) {
+        // Fallback to SDL pref path
+        char* pref = SDL_GetPrefPath("Genesis", "Genesis3");
+        if (pref) { ScreenLog::get().init(pref); SDL_free(pref); }
+        else ScreenLog::get().init("/sdcard");
+    } else {
+        ScreenLog::get().init(logDir);
+    }
+#else
+    ScreenLog::get().init(".");
+#endif
+
+    SLOG_OK("=== Genesis 3.0 Native starting ===");
 
     // ─── Simulation Config ────────────────────────────────────────
     SimConfig config;
@@ -80,23 +85,23 @@ int main(int argc, char* argv[]) {
     config.worldScale = 1.0f;
 
     // ─── Init Engine ──────────────────────────────────────────────
-    LOGI("Creating engine: %dx%d, %d particles, max=%d",
-         config.width, config.height, config.initialParticles, config.maxParticles);
+    SLOG_INFO("Engine: %dx%d, %d particles, max=%d",
+              config.width, config.height, config.initialParticles, config.maxParticles);
     Engine engine(config);
-    LOGI("Engine created: %d particles, %d nutrients",
-         (int)engine.state.particles.size(), (int)engine.state.nutrients.size());
+    SLOG_OK("Engine OK: %d particles, %d nutrients",
+            (int)engine.state.particles.size(), (int)engine.state.nutrients.size());
 
     // ─── Init Renderer ────────────────────────────────────────────
-    LOGI("Creating renderer 1280x800");
+    SLOG_INFO("Creating renderer 1280x800...");
     Renderer renderer(1280, 800);
     if (!renderer.init()) {
-        LOGE("Failed to init renderer");
+        SLOG_ERROR("FAILED to init renderer!");
         return 1;
     }
-    LOGI("Renderer initialized: window=%dx%d", renderer.winWidth, renderer.winHeight);
+    SLOG_OK("Renderer OK: window=%dx%d", renderer.winWidth, renderer.winHeight);
 
     // ─── Main Loop ────────────────────────────────────────────────
-    LOGI("Entering main loop");
+    SLOG_OK("Entering main loop...");
     bool running = true;
     bool paused = false;
     int speedMultiplier = 1;
@@ -233,15 +238,13 @@ int main(int argc, char* argv[]) {
             fps = frameCount / elapsed;
             frameCount = 0;
             lastFpsTime = now;
-            LOGI("Frame=%d FPS=%.0f Pop=%d Nutrients=%d Bonds=%d Viruses=%d dt=%.4f Season=%s",
-                 totalFrames, fps,
-                 (int)engine.state.particles.size(),
-                 (int)engine.state.nutrients.size(),
-                 (int)engine.state.bonds.size(),
-                 (int)engine.state.viruses.size(),
-                 dt, engine.state.season.c_str());
-            printStats(engine.state);
-            printf("FPS=%.0f", fps);
+            SLOG_INFO("F=%d FPS=%.0f Pop=%d Nutr=%d Bond=%d Vir=%d %s",
+                      totalFrames, fps,
+                      (int)engine.state.particles.size(),
+                      (int)engine.state.nutrients.size(),
+                      (int)engine.state.bonds.size(),
+                      (int)engine.state.viruses.size(),
+                      engine.state.season.c_str());
         }
     }
 
