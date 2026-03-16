@@ -32,7 +32,7 @@ public:
     }
 
     void init(const char* logDir) {
-        std::lock_guard<std::mutex> lock(mtx);
+        std::lock_guard<std::recursive_mutex> lock(mtx);
         // Build file path
         if (logDir && logDir[0]) {
             snprintf(logPath, sizeof(logPath), "%s/genesis_crash_log.txt", logDir);
@@ -85,12 +85,12 @@ public:
     }
 
     void flush() {
-        std::lock_guard<std::mutex> lock(mtx);
+        std::lock_guard<std::recursive_mutex> lock(mtx);
         if (fp) fflush(fp);
     }
 
     void close() {
-        std::lock_guard<std::mutex> lock(mtx);
+        std::lock_guard<std::recursive_mutex> lock(mtx);
         if (fp) { fclose(fp); fp = nullptr; }
     }
 
@@ -111,14 +111,14 @@ private:
     int count = 0;
     FILE* fp = nullptr;
     char logPath[512] = {};
-    std::mutex mtx;
+    std::recursive_mutex mtx;
     float startTime = 0;
     bool startTimeSet = false;
 
     ScreenLog() = default;
 
     void addInternal(float r, float g, float b, const char* fmt, ...) {
-        std::lock_guard<std::mutex> lock(mtx);
+        std::lock_guard<std::recursive_mutex> lock(mtx);
 
         Line& line = lines[writePos];
         va_list args;
