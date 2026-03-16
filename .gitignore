@@ -6,3 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Android build artifacts
+android/app/build/
+android/.gradle/
