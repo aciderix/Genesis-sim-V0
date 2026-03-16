@@ -7,7 +7,7 @@ let isRunning = false;
 let speedMultiplier = 1;
 let tickCount = 0;
 
-const TARGET_FPS = 60;
+const TARGET_FPS = 30;
 
 function loop() {
   if (!isRunning || !engine) return;
@@ -100,6 +100,7 @@ function loop() {
 
   tickCount++;
   const sendHeavyData = tickCount % 15 === 0;
+  const sendPheromones = tickCount % 5 === 0;
 
   const ctx: Worker = self as any;
   ctx.postMessage({
@@ -108,7 +109,7 @@ function loop() {
       particles: pData.buffer,
       nutrients: nData.buffer,
       bonds: bData.buffer,
-      pheromones: engine.state.pheromones.buffer.slice(0),
+      pheromones: sendPheromones ? engine.state.pheromones.buffer.slice(0) : null,
       sounds: sData.buffer,
       viruses: vData.buffer,
       obstacles: engine.state.obstacles,

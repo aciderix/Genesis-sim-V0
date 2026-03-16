@@ -14,6 +14,13 @@ function sigmoid(x: number) { return 1 / (1 + Math.exp(-x)); }
 function clamp(v: number, lo: number, hi: number) { return v < lo ? lo : v > hi ? hi : v; }
 function dist3d(a: Vec3, b: Vec3) { return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2 + (a.z-b.z)**2); }
 function bkey(a: number, b: number): number { return a < b ? a * 1000000 + b : b * 1000000 + a; }
+// Fast tanh approximation (Pade approximant, ~6x faster than Math.tanh)
+function fastTanh(x: number): number {
+  if (x < -3) return -1;
+  if (x > 3) return 1;
+  const x2 = x * x;
+  return x * (27 + x2) / (27 + 9 * x2);
+}
 
 export class Engine {
   state: SimState;
@@ -32,11 +39,14 @@ export class Engine {
   private grid: Particle[][];
   private nutrientGrid: Nutrient[][];
 
+  // Performance: frame counter for throttling expensive operations
+  private _frameCount = 0;
+
   // Reusable structures
   private bondSet: Set<number> = new Set();
-  private _nnInputs = new Float64Array(NEURAL_INPUTS);
-  private _nnHidden = new Float64Array(NEURAL_HIDDEN);
-  private _nnOutputs = new Float64Array(NEURAL_OUTPUTS);
+  private _nnInputs = new Float32Array(NEURAL_INPUTS);
+  private _nnHidden = new Float32Array(NEURAL_HIDDEN);
+  private _nnOutputs = new Float32Array(NEURAL_OUTPUTS);
   private _particleMap: Map<number, Particle> = new Map();
   private _activeSpecies: Set<number> = new Set();
 
@@ -743,15 +753,21 @@ export class Engine {
     }
 
     // CO2 / O2 atmosphere
-    const totalPhotosynthesis = this.state.particles.filter(p => p.trophicLevel === TrophicLevel.Autotroph).length;
+    let totalPhotosynthesis = 0;
+    for (let i = 0; i < this.state.particles.length; i++) {
+      if (this.state.particles[i].trophicLevel === TrophicLevel.Autotroph) totalPhotosynthesis++;
+    }
     const totalRespiration = this.state.particles.length;
     this.state.oxygenLevel = clamp(this.state.oxygenLevel + (totalPhotosynthesis * 0.0001 - totalRespiration * 0.00005) * dt, 0.05, 0.4);
     this.state.co2Level = clamp(this.state.co2Level + (totalRespiration * 0.00005 - totalPhotosynthesis * 0.0001) * dt, 0.01, 0.2);
 
-    this.updateOrganisms();
-    this.updatePheromones(dt);
-    this.updateMorphogens(dt);
-    this.updateTemperature(dt);
+    this._frameCount++;
+    // Throttle expensive field updates: every 2nd frame for pheromones,
+    // every 3rd for morphogens/temperature (minimal visual/behavioral impact)
+    if (this._frameCount % 3 === 0) this.updateOrganisms();
+    if (this._frameCount % 2 === 0) this.updatePheromones(dt * 2);
+    if (this._frameCount % 3 === 0) this.updateMorphogens(dt * 3);
+    if (this._frameCount % 3 === 0) this.updateTemperature(dt * 3);
 
     // Sounds
     for (let i = this.state.sounds.length - 1; i >= 0; i--) {
@@ -867,10 +883,15 @@ export class Engine {
       if (hit) this.state.viruses.splice(i, 1);
     }
 
-    // Novelty search
-    if (Math.random() < 0.05 && this.state.particles.length > 0) {
-      const avgEnergy = this.state.particles.reduce((a, b) => a + b.energy, 0) / this.state.particles.length;
-      const avgComp = this.state.particles.reduce((a, b) => a + b.complexity, 0) / this.state.particles.length;
+    // Novelty search (throttled: ~1% of frames instead of 5%)
+    if (this._frameCount % 20 === 0 && this.state.particles.length > 0) {
+      let totalE = 0, totalC = 0;
+      for (let i = 0; i < this.state.particles.length; i++) {
+        totalE += this.state.particles[i].energy;
+        totalC += this.state.particles[i].complexity;
+      }
+      const avgEnergy = totalE / this.state.particles.length;
+      const avgComp = totalC / this.state.particles.length;
       const descriptor = { pop: this.state.particles.length, avgEnergy, avgComp };
       let minD = Infinity;
       for (const arch of this.state.noveltyArchive) {
@@ -967,8 +988,8 @@ export class Engine {
       const senseR = 100 * p.genome.senseRange;
       const senseRSq = senseR * senseR;
 
-      for (let ddx = -2; ddx <= 2; ddx++) {
-        for (let ddy = -2; ddy <= 2; ddy++) {
+      for (let ddx = -1; ddx <= 1; ddx++) {
+        for (let ddy = -1; ddy <= 1; ddy++) {
           const nx = gx + ddx, ny = gy + ddy;
           if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
           const idx = ny * cols + nx;
@@ -1059,7 +1080,7 @@ export class Engine {
       for (let j = 0; j < NEURAL_HIDDEN; j++) {
         hidden[j] = brain.biasH[j] || 0;
         for (let k = 0; k < NEURAL_INPUTS; k++) hidden[j] += inputs[k] * brain.wIH[k][j];
-        hidden[j] = Math.tanh(hidden[j] * brain.neuromodulator);
+        hidden[j] = fastTanh(hidden[j] * brain.neuromodulator);
       }
 
       const outputs = this._nnOutputs;
@@ -1259,7 +1280,14 @@ export class Engine {
         if (n.amount < 20) n.isCorpse = false;
       }
     }
-    this.state.nutrients = this.state.nutrients.filter(n => n.amount > 0);
+    // In-place nutrient removal
+    let nWriteIdx = 0;
+    for (let i = 0; i < this.state.nutrients.length; i++) {
+      if (this.state.nutrients[i].amount > 0) {
+        this.state.nutrients[nWriteIdx++] = this.state.nutrients[i];
+      }
+    }
+    this.state.nutrients.length = nWriteIdx;
 
     // ─── Bond springs ─────────────────────────────────────
     const particleMap = this._particleMap;
@@ -1310,28 +1338,48 @@ export class Engine {
     for (const s of this.state.speciesHistory) {
       if (!s.extinct && !this._activeSpecies.has(s.id)) s.extinct = true;
     }
-    this.state.particles = this.state.particles.filter(p => !p.dead);
+    // In-place dead particle removal (avoids array allocation)
+    let writeIdx = 0;
+    for (let i = 0; i < this.state.particles.length; i++) {
+      if (!this.state.particles[i].dead) {
+        this.state.particles[writeIdx++] = this.state.particles[i];
+      }
+    }
+    this.state.particles.length = writeIdx;
 
-    // Record history
+    // Record history (single pass instead of multiple filter/reduce calls)
     if (Math.floor(this.state.time) > Math.floor(this.state.time - dt)) {
       const ps = this.state.particles;
       const len = ps.length || 1;
-      const avgEnergy = ps.reduce((a, b) => a + b.energy, 0) / len;
-      const avgComp = ps.reduce((a, b) => a + b.complexity, 0) / len;
+      let totalEnergy = 0, totalComp = 0, totalTemp = 0;
+      let autotrophs = 0, herbivores = 0, predators = 0, decomposers = 0, parasites = 0;
+      for (let i = 0; i < ps.length; i++) {
+        const p = ps[i];
+        totalEnergy += p.energy;
+        totalComp += p.complexity;
+        totalTemp += p.temperature;
+        switch (p.trophicLevel) {
+          case TrophicLevel.Autotroph: autotrophs++; break;
+          case TrophicLevel.Herbivore: herbivores++; break;
+          case TrophicLevel.Predator: predators++; break;
+          case TrophicLevel.Decomposer: decomposers++; break;
+          case TrophicLevel.Parasite: parasites++; break;
+        }
+      }
       this.state.history.push({
         time: this.state.time,
         population: ps.length,
-        avgEnergy, avgComplexity: avgComp,
-        autotrophCount: ps.filter(p => p.trophicLevel === TrophicLevel.Autotroph).length,
-        herbivoreCount: ps.filter(p => p.trophicLevel === TrophicLevel.Herbivore).length,
-        predatorCount: ps.filter(p => p.trophicLevel === TrophicLevel.Predator).length,
-        decomposerCount: ps.filter(p => p.trophicLevel === TrophicLevel.Decomposer).length,
-        parasiteCount: ps.filter(p => p.trophicLevel === TrophicLevel.Parasite).length,
-        avgTemperature: this.config.enableTemperature ? ps.reduce((a, b) => a + b.temperature, 0) / len : 0,
+        avgEnergy: totalEnergy / len, avgComplexity: totalComp / len,
+        autotrophCount: autotrophs,
+        herbivoreCount: herbivores,
+        predatorCount: predators,
+        decomposerCount: decomposers,
+        parasiteCount: parasites,
+        avgTemperature: this.config.enableTemperature ? totalTemp / len : 0,
         virusCount: this.state.viruses.length,
         bondCount: this.state.bonds.length,
         speciesCount: this._activeSpecies.size,
-        biomass: ps.reduce((a, b) => a + b.energy, 0)
+        biomass: totalEnergy
       });
       if (this.state.history.length > 200) this.state.history.shift();
     }

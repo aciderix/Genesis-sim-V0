@@ -142,7 +142,7 @@ export default function App() {
     ctx.translate(transform.x, transform.y);
     ctx.scale(transform.scale, transform.scale);
 
-    // Pheromones
+    // Pheromones (only update texture when new data arrives, reuse cached canvas otherwise)
     const PHEROMONE_CELL_SIZE = 10;
     const cols = Math.ceil(width / PHEROMONE_CELL_SIZE);
     const rows = Math.ceil(height / PHEROMONE_CELL_SIZE);
@@ -152,24 +152,26 @@ export default function App() {
       pheromoneCanvasRef.current.height = rows;
     }
     const pCanvas = pheromoneCanvasRef.current;
-    const pCtx = pCanvas.getContext('2d');
-    if (pCtx && payload.pheromones) {
-      const pData = new Float32Array(payload.pheromones);
-      const imgData = pCtx.createImageData(cols, rows);
-      for (let i = 0; i < Math.min(pData.length, cols * rows); i++) {
-        const val = pData[i];
-        const idx = i * 4;
-        imgData.data[idx] = 139;
-        imgData.data[idx + 1] = 92;
-        imgData.data[idx + 2] = 246;
-        imgData.data[idx + 3] = Math.min(val * 2, 128);
+    if (payload.pheromones) {
+      const pCtx = pCanvas.getContext('2d');
+      if (pCtx) {
+        const pData = new Float32Array(payload.pheromones);
+        const imgData = pCtx.createImageData(cols, rows);
+        for (let i = 0; i < Math.min(pData.length, cols * rows); i++) {
+          const val = pData[i];
+          const idx = i * 4;
+          imgData.data[idx] = 139;
+          imgData.data[idx + 1] = 92;
+          imgData.data[idx + 2] = 246;
+          imgData.data[idx + 3] = Math.min(val * 2, 128);
+        }
+        pCtx.putImageData(imgData, 0, 0);
       }
-      pCtx.putImageData(imgData, 0, 0);
-      ctx.globalAlpha = 0.6;
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(pCanvas, 0, 0, width, height);
-      ctx.globalAlpha = 1.0;
     }
+    ctx.globalAlpha = 0.6;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(pCanvas, 0, 0, width, height);
+    ctx.globalAlpha = 1.0;
 
     // Grid
     ctx.strokeStyle = `rgba(255, 255, 255, ${0.03 + payload.stats.dayLight * 0.03})`;
@@ -299,16 +301,19 @@ export default function App() {
       }
     }
 
-    // Bonds (color-coded by type)
+    // Bonds (batched by type for fewer state changes)
     const bonds = new Float32Array(payload.bonds);
     ctx.lineWidth = 2 / transform.scale;
-    for (let i = 0; i < bonds.length; i += 3) {
-      const p1 = positions.get(bonds[i]), p2 = positions.get(bonds[i + 1]);
-      const bType = bonds[i + 2];
-      if (p1 && p2) {
-        ctx.strokeStyle = bType === 0 ? 'rgba(255,255,255,0.3)' : bType === 1 ? 'rgba(59,130,246,0.5)' : 'rgba(239,68,68,0.4)';
-        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+    const bondColors = ['rgba(255,255,255,0.3)', 'rgba(59,130,246,0.5)', 'rgba(239,68,68,0.4)'];
+    for (let bType = 0; bType < 3; bType++) {
+      ctx.strokeStyle = bondColors[bType];
+      ctx.beginPath();
+      for (let i = 0; i < bonds.length; i += 3) {
+        if (bonds[i + 2] !== bType) continue;
+        const p1 = positions.get(bonds[i]), p2 = positions.get(bonds[i + 1]);
+        if (p1 && p2) { ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); }
       }
+      ctx.stroke();
     }
     ctx.restore();
   };
